@@ -6237,7 +6237,9 @@ namespace GEO {
             int nb_cores = android_get_number_of_cores();
             geo_assert(nb_cores > 0);
             return index_t(nb_cores);
-#else
+#elif defined GEO_OS_EMSCRIPTEN
+	    return 1;
+#else	    
             return index_t(sysconf(_SC_NPROCESSORS_ONLN));
 #endif
         }
@@ -19110,8 +19112,8 @@ namespace GEO {
             const double* p3,
             double h0, double h1, double h2, double h3
         ) {
-            std::cerr << "calling in_circle_3dlifted_SOS()"
-                      << std::endl;
+//            std::cerr << "calling in_circle_3dlifted_SOS()"
+//                      << std::endl;
             // in_circle_3dlifted is simply implemented using side3_3dlifted.
             // Both predicates are equivalent through duality
             // (see comment in in_circle_3d_SOS(), the same
@@ -21511,9 +21513,10 @@ namespace GEO {
     }
 
     index_t Delaunay2d::insert(index_t v, index_t hint) {
-       index_t t_bndry;
-       index_t e_bndry;
-       index_t first_conflict, last_conflict;
+       index_t t_bndry = NO_TRIANGLE;
+       index_t e_bndry = index_t(-1);
+       index_t first_conflict = NO_TRIANGLE;
+       index_t last_conflict  = NO_TRIANGLE;
 
        const double* p = vertex_ptr(v);
 
@@ -22660,9 +22663,10 @@ namespace GEO {
     }
 
     index_t Delaunay3d::insert(index_t v, index_t hint) {
-       index_t t_bndry;
-       index_t f_bndry;
-       index_t first_conflict, last_conflict;
+       index_t t_bndry = NO_TETRAHEDRON;
+       index_t f_bndry = index_t(-1);
+       index_t first_conflict = NO_TETRAHEDRON;
+       index_t last_conflict = NO_TETRAHEDRON;
 
        const double* p = vertex_ptr(v);
 

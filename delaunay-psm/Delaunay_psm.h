@@ -2590,10 +2590,14 @@ namespace GEO {
         // TODO: This is a limitation of WindowsThreadManager, to be fixed.
         threads_per_core = 1;
 #endif
+
         index_t nb_threads = geo_min(
             to - from,
             Process::maximum_concurrent_threads() * threads_per_core
         );
+
+	nb_threads = geo_max(1u, nb_threads);
+	
         index_t batch_size = (to - from) / nb_threads;
         if(Process::is_running_threads() || nb_threads == 1) {
             for(index_t i = from; i < to; i++) {
@@ -4106,6 +4110,12 @@ namespace GEO {
     typedef vecng<3, Numeric::float64> vec3;
 
     typedef vecng<4, Numeric::float64> vec4;
+
+    typedef vecng<2, Numeric::float32> vec2f;
+
+    typedef vecng<3, Numeric::float32> vec3f;
+
+    typedef vecng<4, Numeric::float32> vec4f;
 
    
     typedef vecng<2, Numeric::int32> vec2i;
