@@ -4232,6 +4232,16 @@ namespace GEO {
 	    return triangle_area_3d(p1.data(), p2.data(), p3.data());
         }
 
+        inline double triangle_signed_area_2d(
+            const double* p1, const double* p2, const double* p3
+        ) {
+	    double a = p2[0]-p1[0];
+	    double b = p3[0]-p1[0];
+	    double c = p2[1]-p1[1];
+	    double d = p3[1]-p1[1];
+	    return 0.5*(a*d-b*c);
+        }
+	
         inline double triangle_signed_area(
             const vec2& p1, const vec2& p2, const vec2& p3
         ) {
@@ -4244,6 +4254,12 @@ namespace GEO {
             return ::fabs(triangle_signed_area(p1, p2, p3));
         }
 
+        inline double triangle_area_2d(
+            const double* p1, const double* p2, const double* p3
+        ) {
+	    return ::fabs(triangle_signed_area_2d(p1,p2,p3));
+	}
+	
         vec2 GEOGRAM_API triangle_circumcenter(
             const vec2& p1, const vec2& p2, const vec2& p3
         );
@@ -5004,8 +5020,8 @@ namespace GEO {
 
     class GEOGRAM_API Stopwatch {
     public:
-        Stopwatch(const std::string& task_name) :
-            task_name_(task_name) {
+        Stopwatch(const std::string& task_name, bool verbose=true) :
+  	    task_name_(task_name), verbose_(verbose) {
         }
 
         double elapsed_time() const {
@@ -5014,15 +5030,18 @@ namespace GEO {
 
 
         ~Stopwatch() {
-            Logger::out(task_name_)
-                << "Elapsed time: " << W_.elapsed_user_time()
-                << " s" << std::endl;
+	    if(verbose_) {
+		Logger::out(task_name_)
+		    << "Elapsed time: " << W_.elapsed_user_time()
+		    << " s" << std::endl;
+	    }
         }
 
         
 
     private:
         std::string task_name_;
+	bool verbose_;
         SystemStopwatch W_;
     };
 }

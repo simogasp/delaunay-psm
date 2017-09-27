@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.1)
 
-project(delaunay-psm LANGUAGES CXX VERSION 1.5.0)
+project(delaunay-psm LANGUAGES CXX VERSION 1.5.1)
 
 set(CMAKE_CXX_STANDARD 11)
 
