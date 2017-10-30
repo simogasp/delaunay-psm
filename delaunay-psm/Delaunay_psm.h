@@ -1552,9 +1552,9 @@ namespace GEO {
 }
 
 extern "C" {
-    void GEOGRAM_API geogram_printf(const char* format, ...);
+    int GEOGRAM_API geogram_printf(const char* format, ...);
 
-    void GEOGRAM_API geogram_fprintf(FILE* out, const char* format, ...);
+    int GEOGRAM_API geogram_fprintf(FILE* out, const char* format, ...);
 }
 
 #else
@@ -1565,9 +1565,9 @@ extern "C" {
 #define GEOGRAM_API
 #endif
 
-extern void GEOGRAM_API geogram_printf(const char* format, ...);
+extern int GEOGRAM_API geogram_printf(const char* format, ...);
 
-extern void GEOGRAM_API geogram_fprintf(FILE* out, const char* format, ...);
+extern int GEOGRAM_API geogram_fprintf(FILE* out, const char* format, ...);
 
 #endif
 
