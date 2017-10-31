@@ -1,0 +1,76 @@
+language: cpp
+dist: trusty
+sudo: false
+
+addons:
+  apt:
+    sources:
+      - llvm-toolchain-trusty-4.0
+      - ubuntu-toolchain-r-test
+    packages:
+      - clang-4.0
+      - g++-5
+
+matrix:
+  include:
+    - compiler: gcc
+      env: COMPILERS="CXX=g++-4.8 && CC=gcc-4.8" TOOLSET=gcc
+    - compiler: gcc-5
+      env: COMPILERS="CXX=g++-5 && CC=gcc-5" TOOLSET=gcc
+    - compiler: clang-4.0
+      env: COMPILERS="CXX=clang++-4.0 && CC=clang-4.0" TOOLSET=clang
+    - compiler: clang
+      env: COMPILERS="CXX=clang++ && CC=clang" TOOLSET=clang
+
+
+env:
+  global:
+    - NUM_CPU="`grep processor /proc/cpuinfo | wc -l`"; echo $NUM_CPU
+    - DELAUNAY_SOURCE=${TRAVIS_BUILD_DIR}
+    - DELAUNAY_BUILD=${TRAVIS_BUILD_DIR}/build
+    - DELAUNAY_INSTALL=${DELAUNAY_BUILD}/install
+    - DELAUNAY_APP_SRC=${DELAUNAY_SOURCE}/example
+    - DELAUNAY_APP_BUILD=${DELAUNAY_APP_SRC}/build
+    - DELAUNAY_APP_INSTALL=${DELAUNAY_APP_BUILD}/install
+
+before_install:
+    - eval "${COMPILERS}"
+
+before_script:
+  - mkdir -p ${DELAUNAY_BUILD}
+  - mkdir -p ${DELAUNAY_APP_BUILD}
+  - cd ${DELAUNAY_BUILD}
+  - cmake . ${DELAUNAY_SOURCE} -DCMAKE_INSTALL_PREFIX=${DELAUNAY_INSTALL}
+
+script:
+#  - cc --version
+#  - c++ --version
+#  - gcc --version
+#  - g++ --version
+#  - cmake --version
+#  - ${CXX} --version
+#  - ${CC} --version
+  - make install -j ${NUM_CPU} VERBOSE=1
+  - cd ${DELAUNAY_APP_SRC}
+  - cd ${DELAUNAY_APP_BUILD}
+  - cmake .. -Ddelaunay-psm_DIR=${DELAUNAY_INSTALL}/lib/cmake/delaunay-psm/ -DCMAKE_INSTALL_PREFIX=${DELAUNAY_APP_INSTALL}
+  - make install -j ${NUM_CPU} VERBOSE=1
+
+before_deploy:
+  - ARCHIVE_BASE_PATH=${DELAUNAY_BUILD}
+  - TARGET_NAME=$(echo ${TRAVIS_REPO_SLUG} | cut -d "/" -f2)
+  - TARGET_VERSION=$(echo ${TRAVIS_TAG} | cut -d "v" -f2)
+  - TARGET_FULL_NAME=${TARGET_NAME}-${TARGET_VERSION}-${CC}-${TRAVIS_OS_NAME}
+  - INSTALL_ARCHIVE_FILENAME=${TARGET_FULL_NAME}.tgz
+  - cd ${DELAUNAY_BUILD}
+  - mv ${DELAUNAY_INSTALL} ${DELAUNAY_BUILD}/${TARGET_FULL_NAME}
+  - tar -czvf ${INSTALL_ARCHIVE_FILENAME} ${TARGET_FULL_NAME}
+
+deploy:
+  provider: releases
+  api_key:
+    secure: ${GITHUB_RELEASE_API_KEY}
+  file: ${ARCHIVE_BASE_PATH}/${INSTALL_ARCHIVE_FILENAME}
+  skip_cleanup: true
+  on:
+    tags: true
