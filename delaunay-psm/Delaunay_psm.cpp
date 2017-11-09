@@ -2215,6 +2215,22 @@ namespace {
                : name.substr(0, pos);
     }
 
+
+    std::string get_display_arg(const std::string& arg_name) {
+	CmdLine::ArgType arg_type = get_arg_type(arg_name);
+	std::string result;
+	if(arg_type == CmdLine::ARG_DOUBLE) {
+	    double x = CmdLine::get_arg_double(arg_name);
+	    result = String::to_display_string(x);
+	} else if(arg_type == CmdLine::ARG_PERCENT) {
+	    double x = CmdLine::get_arg_percent(arg_name, 100.0);
+	    result = String::to_display_string(x) + "%";
+	} else {
+	    result = CmdLine::get_arg(arg_name);
+	}
+	return result;
+    }
+    
     struct Line {
         std::string name;
         std::string value;
@@ -2265,7 +2281,7 @@ namespace {
 
             Line line;
             line.name = name_marker + arg.name;
-            line.value = " (=" + get_arg(arg.name) + ") : ";
+            line.value = " (=" + get_display_arg(arg.name) + ") : ";
             line.desc = arg.desc;
             lines.push_back(line);
 
@@ -2293,6 +2309,7 @@ namespace {
             }
         }
     }
+
 }
 
 
@@ -7228,12 +7245,16 @@ namespace GEO {
 #pragma GCC diagnostic ignored "-Wc++11-long-long"
 #endif
 
-// I do not know why, but without that isnan() and
-// isfinite() are not recognized when compiling
-// geogram in PSM mode under MacOSX.
-#if defined(GEOGRAM_PSM) && defined(GEO_OS_APPLE)
-using std::isnan;
-using std::isfinite;
+#ifdef GEO_COMPILER_MSVC
+#define isnan _isnan
+#define isfinite _finite
+#else
+#ifndef isnan
+#define isnan std::isnan
+#endif
+#ifndef isfinite
+#define isfinite std::isfinite
+#endif
 #endif
 
 namespace GEO {
@@ -7244,11 +7265,7 @@ namespace GEO {
         // this function, since it is a macro in some implementations.
 
         bool is_nan(float32 x) {
-#ifdef GEO_OS_WINDOWS
-            return (_isnan(x) != 0) || (_finite(x) == 0);
-#else
             return isnan(x) || !isfinite(x);
-#endif
         }
 
 
@@ -7263,11 +7280,7 @@ namespace GEO {
 #endif            
         
         bool is_nan(float64 x) {
-#ifdef GEO_OS_WINDOWS
-            return (_isnan(x) != 0) || (_finite(x) == 0);
-#else
             return isnan(x) || !isfinite(x);
-#endif            
         }
 
 #ifdef GEO_COMPILER_GCC
@@ -23356,6 +23369,12 @@ namespace GEO {
                 }
             }
             finished_ = true;
+
+	    //   Fix by Hiep Vu: wake up threads that potentially missed
+	    // the previous wake ups.
+	    pthread_mutex_lock(&mutex_);
+	    send_event();
+	    pthread_mutex_unlock(&mutex_);
         }
 
         static const index_t NO_TETRAHEDRON = index_t(-1);
@@ -24513,12 +24532,14 @@ namespace GEO {
         }
         
         void wait_for_event(index_t t) {
+	    // Fixed by Hiep Vu: enlarged critical section (contains
+	    // now the test (!thrd->finished)
             Delaunay3dThread* thrd = thread(t);
+	    pthread_mutex_lock(&(thrd->mutex_));	    
             if(!thrd->finished_) {
-                pthread_mutex_lock(&(thrd->mutex_));
                 pthread_cond_wait(&(thrd->cond_), &(thrd->mutex_));
-                pthread_mutex_unlock(&(thrd->mutex_));
             }
+	    pthread_mutex_unlock(&(thrd->mutex_));	    
         }
 
                 

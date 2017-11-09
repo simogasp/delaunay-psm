@@ -1582,7 +1582,7 @@ extern int GEOGRAM_API geogram_fprintf(FILE* out, const char* format, ...);
 
 
 #ifdef GEO_OS_LINUX
-#  if defined(GEO_OS_EMSCRIPTEN)
+#  if defined(GEO_OS_EMSCRIPTEN) 
 #    define GEO_USE_DUMMY_ATOMICS
 #  elif defined(GEO_OS_ANDROID) || defined(GEO_OS_RASPBERRY)
 #    define GEO_USE_ARM_ATOMICS
@@ -1608,6 +1608,40 @@ inline char atomic_bittestandreset_x86(volatile unsigned int*, unsigned int) {
 
 
 typedef GEO::Numeric::uint32 arm_mutex_t;
+
+
+#ifdef __aarch64__
+
+inline void lock_mutex_arm(volatile arm_mutex_t* lock) {
+    while(__sync_lock_test_and_set(lock, 1) != 0);
+}
+
+inline void unlock_mutex_arm(volatile arm_mutex_t* lock) {
+    __sync_lock_release(lock);
+}
+
+inline unsigned int atomic_bitset_arm(volatile unsigned int* ptr, unsigned int bit) {
+    return __sync_fetch_and_or(ptr, 1u << bit) & (1u << bit);
+}
+
+inline unsigned int atomic_bitreset_arm(volatile unsigned int* ptr, unsigned int bit) {
+    return __sync_fetch_and_and(ptr, ~(1u << bit)) & (1u << bit);
+}
+
+inline void memory_barrier_arm() {
+    // Full memory barrier.
+    __sync_synchronize();
+}
+
+inline void wait_for_event_arm() {
+    /* TODO */    
+}
+
+inline void send_event_arm() {
+    /* TODO */    
+}
+
+#else
 
 inline void lock_mutex_arm(volatile arm_mutex_t* lock) {
     arm_mutex_t tmp;
@@ -1693,6 +1727,7 @@ inline void send_event_arm() {
     );
 }
 
+#endif
 
 #elif defined(GEO_USE_X86_ATOMICS)
 
@@ -4624,7 +4659,6 @@ namespace GEO {
             bool skip_empty_fields = true
         );
 
-
         bool GEOGRAM_API split_string(
             const std::string& in,
             char separator,
@@ -4676,6 +4710,26 @@ namespace GEO {
             return out.str();
         }
 
+        template <class T>
+        inline std::string to_display_string(const T& value) {
+	    return to_string(value);
+	}
+
+
+        template <>
+        inline std::string to_display_string(const double& value) {
+            std::ostringstream out;	    
+            out << value;
+            return out.str();
+	}
+
+        template <>
+        inline std::string to_display_string(const float& value) {
+            std::ostringstream out;	    
+            out << value;
+            return out.str();
+	}
+	
         template <>
         inline std::string to_string(const bool& value) {
             return value ? "true" : "false";
