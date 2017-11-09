@@ -7,7 +7,10 @@ set(CMAKE_CXX_STANDARD 11)
 option(BUILD_SAMPLE "Build the example file" ON)
 option(BUILD_SHARED_LIBS "Build shared libraries" ON)
 
+find_package(Threads REQUIRED)
+
 add_library(delaunay delaunay-psm/Delaunay_psm.cpp)
+target_link_libraries(delaunay PRIVATE Threads::Threads)
 
 set_target_properties(delaunay PROPERTIES DEBUG_POSTFIX "d")
 set_target_properties(delaunay PROPERTIES
