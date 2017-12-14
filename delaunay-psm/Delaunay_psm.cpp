@@ -3640,6 +3640,10 @@ namespace {
             "one of auto, GLUP150, GLUP440, VanillaGL"
         );
         declare_arg("gfx:full_screen", false, "full screen mode");
+	declare_arg(
+	    "gfx:transparent", false,
+	    "use transparent backsgroung (desktop integration)"
+	);
         declare_arg(
             "gfx:GLSL_tesselation", true, "use tesselation shaders if available"
         );
@@ -4190,7 +4194,7 @@ namespace GEO {
 
     void Logger::unregister_client(LoggerClient* c) {
         geo_debug_assert(clients_.find(c) != clients_.end());
-        clients_.erase(c);
+	clients_.erase(c);
     }
 
     void Logger::unregister_all_clients() {
@@ -7245,47 +7249,25 @@ namespace GEO {
 #pragma GCC diagnostic ignored "-Wc++11-long-long"
 #endif
 
-#ifdef GEO_COMPILER_MSVC
-#define isnan _isnan
-#define isfinite _finite
-#else
-#ifndef isnan
-#define isnan std::isnan
-#endif
-#ifndef isfinite
-#define isfinite std::isfinite
-#endif
-#endif
-
 namespace GEO {
 
     namespace Numeric {
 
-        // Note: do not add global scope (::isnan) for calling
-        // this function, since it is a macro in some implementations.
-
         bool is_nan(float32 x) {
-            return isnan(x) || !isfinite(x);
+#ifdef GEO_COMPILER_MSVC
+            return _isnan(x) || !_finite(x);	    
+#else	    
+            return std::isnan(x) || !std::isfinite(x);
+#endif	    
         }
 
-
-// Under GCC, to work for both floats and doubles, isnan() is a macro
-// that calls both isnanf() and isnan(), based on operator size (using ?:),
-// thus it generates a conversion warning (that we ignore using the following
-// pragmas).
-            
-#ifdef GEO_COMPILER_GCC
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wfloat-conversion"
-#endif            
-        
         bool is_nan(float64 x) {
-            return isnan(x) || !isfinite(x);
+#ifdef GEO_COMPILER_MSVC
+            return _isnan(x) || !_finite(x);	    	    
+#else	    
+            return std::isnan(x) || !std::isfinite(x);
+#endif	    
         }
-
-#ifdef GEO_COMPILER_GCC
-#pragma GCC diagnostic pop            
-#endif            
 
         void random_reset() {
 #ifdef GEO_OS_WINDOWS
@@ -8695,10 +8677,6 @@ namespace GEO {
 #pragma fp_contract(off)
 #endif
 
-
-#if defined(GEO_OS_APPLE) && defined(__MAC_10_12)
-#include <os/lock.h>
-#endif
 
 namespace {
 
@@ -20692,11 +20670,13 @@ namespace GEO {
 	
 	if(keeps_infinite()) {
 
-	    // Process the infinite vertex at index nb_vertices().
-	    signed_index_t t = v_to_cell_[nb_vertices()];
-	    if(t != -1) {
-		index_t lv = index(index_t(t), -1);
-		set_next_around_vertex(index_t(t), lv, index_t(t));
+	    {
+		// Process the infinite vertex at index nb_vertices().
+		signed_index_t t = v_to_cell_[nb_vertices()];
+		if(t != -1) {
+		    index_t lv = index(index_t(t), -1);
+		    set_next_around_vertex(index_t(t), lv, index_t(t));
+		}
 	    }
 
 	    for(index_t t = 0; t < nb_cells(); ++t) {
