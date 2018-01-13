@@ -5235,6 +5235,15 @@ namespace GEO {
             int argc, char** argv
         );
 
+	int GEOGRAM_API argc();
+
+	
+	typedef char** charptrptr; // Need to do that else the compiler thinks
+	                           // that GEOGRAM_API qualifies the ptr instead
+	                           // of the function.
+	
+	charptrptr GEOGRAM_API argv();
+	
         void GEOGRAM_API show_usage(
             const std::string& additional_args = "",
             bool advanced = false
