@@ -283,7 +283,7 @@ namespace GEO {
 #define GEO_NORETURN_DECL 
 #endif
 
-#if defined(GEO_COMPILER_CLANG)
+#if defined(GEO_COMPILER_CLANG) || defined(GEO_COMPILER_EMSCRIPTEN)
 #if __has_feature(cxx_noexcept)
 #define GEO_NOEXCEPT noexcept
 #endif
@@ -5114,6 +5114,11 @@ namespace GEO {
 
         void GEOGRAM_API terminate();
 
+
+	void GEOGRAM_API set_config_file_name(const std::string& filename);
+
+	std::string GEOGRAM_API get_config_file_name();
+	
         enum ArgType {
             
             ARG_UNDEFINED = 0,
