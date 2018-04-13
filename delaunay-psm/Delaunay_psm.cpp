@@ -234,7 +234,7 @@ namespace GEO {
 #if __GNUC__ >= 4 && __GNUC_MINOR__ >= 7
 #define geo_assume_aligned(var, alignment) \
         *(void**) (&var) = __builtin_assume_aligned(var, alignment)
-        // the GCC way of specifiying that a pointer is aligned returns
+        // the GCC way of specifying that a pointer is aligned returns
         // the aligned pointer (I can't figure out why). It needs to be
         // affected otherwise it is not taken into account (verified by
         // looking at the output of gcc -S)
@@ -915,7 +915,7 @@ namespace GEO {
             // TODO: try to better understand the formula and
             // determine why there are these sqrt's
             // (probably due to the relation between the
-            //  user-provided density and the one acheived
+            //  user-provided density and the one achieved
             //  by CVT), but I'm pretty sure that the formula
             //  is correct (at least, dimensions match).
             // Note: the ::fabs() are there to avoid numerical
@@ -3967,7 +3967,7 @@ namespace GEO {
    Disables the warning caused by passing 'this' as an argument while
    construction is not finished (in LoggerStream ctor).
    As LoggerStreamBuf only stores the pointer for later use, so we can
-   ignore the fact that 'this' is not completly formed yet.
+   ignore the fact that 'this' is not completely formed yet.
  */
 #ifdef GEO_OS_WINDOWS
 #pragma warning(disable:4355)
@@ -6144,7 +6144,7 @@ namespace {
         static void* run_thread(void* thread_in) {
             Thread* thread = reinterpret_cast<Thread*>(thread_in);
             // Sets the thread-local-storage instance pointer, so
-            // that Thread::current() can retreive it.
+            // that Thread::current() can retrieve it.
             set_current_thread(thread);
             thread->run();
             return nil;
@@ -6556,7 +6556,7 @@ namespace {
         static DWORD WINAPI run_thread(LPVOID p) {
             Thread* thread = (*reinterpret_cast<Thread_var*>(p));
             // Sets the thread-local-storage instance pointer, so
-            // that Thread::current() can retreive it.
+            // that Thread::current() can retrieve it.
             set_current_thread(thread);
             thread->run();
             return 0;
@@ -6856,7 +6856,7 @@ namespace GEO {
             // Get the pid of this process
             DWORD processId = GetCurrentProcessId();
 
-            // then modify its privileges to allow full acces
+            // then modify its privileges to allow full access
             HANDLE hHandle;
 
             hHandle = ::OpenProcess(PROCESS_QUERY_INFORMATION, 0, processId);
@@ -19687,7 +19687,7 @@ namespace GEO {
             // generating branching instructions.
             // Thank to Laurent Alonso for this idea.
             index_t result = index_t( (T[1] == v) | ((T[2] == v) * 2) );
-            // Sanity check, important if it was T[0], not explicitely
+            // Sanity check, important if it was T[0], not explicitly
             // tested (detects input that does not meet the precondition).
             geo_debug_assert(T[result] == v);
             return result; 
@@ -20212,7 +20212,7 @@ namespace GEO {
             index_t result = index_t(
                 (T[1] == v) | ((T[2] == v) * 2) | ((T[3] == v) * 3)
             );
-            // Sanity check, important if it was T[0], not explicitely
+            // Sanity check, important if it was T[0], not explicitly
             // tested (detects input that does not meet the precondition).
             geo_debug_assert(T[result] == v);
             return result; 
@@ -21459,7 +21459,7 @@ namespace GEO {
 
         // A small optimization: if the point to be inserted
         // is on some faces of the located triangle, insert
-        // the neighbors accross those edges in the conflict list.
+        // the neighbors accros those edges in the conflict list.
         // It saves a couple of calls to the predicates in this
         // specific case (combinatorics are in general less 
         // expensive than the predicates).
@@ -22568,7 +22568,7 @@ namespace GEO {
 
         // A small optimization: if the point to be inserted
         // is on some faces of the located tetrahedron, insert
-        // the neighbors accross those faces in the conflict list.
+        // the neighbors accros those faces in the conflict list.
         // It saves a couple of calls to the predicates in this
         // specific case (combinatorics are in general less 
         // expensive than the predicates).
@@ -22683,14 +22683,14 @@ namespace GEO {
         // Replace in new_t the vertex opposite to t1fbord with v
         set_tet_vertex(new_t, t1fbord, v);
 
-        // Connect new_t with t1's neighbor accross t1fbord
+        // Connect new_t with t1's neighbor accros t1fbord
         {
             index_t tbord = index_t(tet_adjacent(t1,t1fbord));
             set_tet_adjacent(new_t, t1fbord, tbord);
             set_tet_adjacent(tbord, find_tet_adjacent(tbord,t1), new_t);
         }
             
-        //  Lookup new_t's neighbors accross its three other
+        //  Lookup new_t's neighbors accros its three other
         // facets and connect them
         for(t1ft2=0; t1ft2<4; ++t1ft2) {
             
@@ -23596,7 +23596,7 @@ namespace GEO {
             }
 
             if(!ok) {
-                //  At this point, this thread did not succesfully
+                //  At this point, this thread did not successfully
                 // acquire all the tets in the conflict zone, so
                 // we need to rollback.
                 release_tets();
@@ -24537,7 +24537,7 @@ namespace GEO {
             index_t result = index_t(
                 (T[1] == v) | ((T[2] == v) * 2) | ((T[3] == v) * 3)
             );
-            // Sanity check, important if it was T[0], not explicitely
+            // Sanity check, important if it was T[0], not explicitly
             // tested (detects input that does not meet the precondition).
             geo_debug_assert(T[result] == v);
             return result; 
@@ -24686,14 +24686,14 @@ namespace GEO {
             // Replace in new_t the vertex opposite to t1fbord with v
             set_tet_vertex(new_t, t1fbord, v);
             
-            // Connect new_t with t1's neighbor accross t1fbord
+            // Connect new_t with t1's neighbor accros t1fbord
             {
                 index_t tbord = index_t(tet_adjacent(t1,t1fbord));
                 set_tet_adjacent(new_t, t1fbord, tbord);
                 set_tet_adjacent(tbord, find_tet_adjacent(tbord,t1), new_t);
             }
             
-            //  Lookup new_t's neighbors accross its three other
+            //  Lookup new_t's neighbors accros its three other
             // facets and connect them
             for(t1ft2=0; t1ft2<4; ++t1ft2) {
                 
@@ -25282,7 +25282,7 @@ namespace GEO {
         
         if(benchmark_mode_) {
             if(nb_sequential_points != 0) {
-                Logger::out("PDEL") << "Local thread memory overflow occured:"
+                Logger::out("PDEL") << "Local thread memory overflow occurred:"
                                     << std::endl;
                 Logger::out("PDEL") << nb_sequential_points
                                     << " points inserted in sequential mode"

@@ -223,6 +223,8 @@ namespace GEO {
 
 #if defined(__clang__)
 #  define GEO_COMPILER_CLANG
+#elif defined(__GNUC__)
+#  define GEO_COMPILER_GCC
 #else
 #  error "Unsupported compiler"
 #endif
@@ -766,7 +768,7 @@ namespace GEO {
 #if __GNUC__ >= 4 && __GNUC_MINOR__ >= 7
 #define geo_assume_aligned(var, alignment) \
         *(void**) (&var) = __builtin_assume_aligned(var, alignment)
-        // the GCC way of specifiying that a pointer is aligned returns
+        // the GCC way of specifying that a pointer is aligned returns
         // the aligned pointer (I can't figure out why). It needs to be
         // affected otherwise it is not taken into account (verified by
         // looking at the output of gcc -S)
