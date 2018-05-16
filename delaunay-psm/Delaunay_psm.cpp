@@ -201,7 +201,7 @@ namespace GEO {
             free(p);
 #elif defined(GEO_COMPILER_INTEL)
             _mm_free(p);
-#elif defined(GEO_COMPILER_GCC) || defined(GEO_COMPILER_CLANG)
+#elif defined(GEO_COMPILER_GCC_FAMILY) 
             free(p);
 #elif defined(GEO_COMPILER_MSVC)
             _aligned_free(p);
@@ -214,7 +214,7 @@ namespace GEO {
 #define geo_decl_aligned(var) var
 #elif defined(GEO_COMPILER_INTEL)
 #define geo_decl_aligned(var) __declspec(aligned(GEO_MEMORY_ALIGNMENT)) var
-#elif defined(GEO_COMPILER_GCC) || defined(GEO_COMPILER_CLANG)
+#elif defined(GEO_COMPILER_GCC_FAMILY)
 #define geo_decl_aligned(var) var __attribute__((aligned(GEO_MEMORY_ALIGNMENT)))
 #elif defined(GEO_COMPILER_MSVC)
 #define geo_decl_aligned(var) __declspec(align(GEO_MEMORY_ALIGNMENT)) var
@@ -241,16 +241,18 @@ namespace GEO {
 #else
 #define geo_assume_aligned(var, alignment)        
 #endif        
-#elif defined(GEO_COMPILER_MSVC)
+#elif defined(GEO_COMPILER_MSVC) 
 #define geo_assume_aligned(var, alignment)
         // TODO: I do not know how to do that with MSVC
 #elif defined(GEO_COMPILER_EMSCRIPTEN)        
+#define geo_assume_aligned(var, alignment)
+#elif defined(GEO_COMPILER_MINGW)        
 #define geo_assume_aligned(var, alignment)
 #endif
 
 #if   defined(GEO_COMPILER_INTEL)
 #define geo_restrict __restrict
-#elif defined(GEO_COMPILER_GCC) || defined(GEO_COMPILER_CLANG)
+#elif defined(GEO_COMPILER_GCC_FAMILY)
 #define geo_restrict __restrict__
 #elif defined(GEO_COMPILER_MSVC)
 #define geo_restrict __restrict
@@ -411,6 +413,30 @@ namespace GEO {
             return baseclass::operator[] (index_t(i));
         }
 
+
+#ifdef GARGANTUA // If compiled with 64 bits index_t
+
+        T& operator[] (int i) {
+            geo_debug_assert(i >= 0 && index_t(i) < size());
+            return baseclass::operator[] (index_t(i));
+        }
+
+        const T& operator[] (int i) const {
+            geo_debug_assert(i >= 0 && index_t(i) < size());
+            return baseclass::operator[] (index_t(i));
+        }
+
+        T& operator[] (unsigned int i) {
+            geo_debug_assert(i >= 0 && index_t(i) < size());
+            return baseclass::operator[] (index_t(i));
+        }
+
+        const T& operator[] (unsigned int i) const {
+            geo_debug_assert(i >= 0 && index_t(i) < size());
+            return baseclass::operator[] (index_t(i));
+        }
+#endif	
+	
         T* data() {
             return size() == 0 ? nil : &(*this)[0];
         }
@@ -5466,7 +5492,7 @@ namespace GEO {
         task_name_(task_name),
         start_time_(SystemStopwatch::now()),
         quiet_(quiet),
-        max_steps_(geo_max(1u, max_steps)),
+        max_steps_(geo_max(index_t(1), max_steps)),
         step_(0),
         percent_(0)
     {
@@ -5481,7 +5507,7 @@ namespace GEO {
         task_name_(task_name),
         start_time_(SystemStopwatch::now()),
         quiet_(Logger::instance()->is_quiet()),
-        max_steps_(geo_max(1u, max_steps)),
+        max_steps_(geo_max(index_t(1), max_steps)),
         step_(0),
         percent_(0)
     {
@@ -5504,7 +5530,7 @@ namespace GEO {
     }
 
     void ProgressTask::reset(index_t max_steps) {
-        max_steps_ = geo_max(1u, max_steps);
+        max_steps_ = geo_max(index_t(1), max_steps);
         reset();
     }
 
@@ -5525,7 +5551,7 @@ namespace GEO {
     }
 
     void ProgressTask::update() {
-        percent_ = geo_min(100u, step_ * 100u / max_steps_);
+        percent_ = geo_min(index_t(100), index_t(step_ * 100 / max_steps_));
         if(!quiet_) {
             task_progress(step_, percent_);
         }
@@ -5788,10 +5814,14 @@ namespace GEO {
 #endif
             }
 
+#if defined(GEO_OS_WINDOWS) && defined(GEO_DEBUG)
+	    // Do not install signal handlers in Windows debug mode,
+	    // because it makes debugging very difficult.
+#else	    
 	    if(::getenv("GEO_NO_SIGNAL_HANDLER") == NULL) {
 		os_install_signal_handlers();
 	    }
-
+#endif
             // Initialize Process default values
 
             enable_multithreading(multithreading_enabled_);
@@ -6647,6 +6677,7 @@ namespace {
 
 #endif
 
+#ifdef GEO_COMPILER_MSVC    
     void abnormal_program_termination(const char* message = nil) {
         if(message != nil) {
             // Do not use Logger here!
@@ -6817,6 +6848,9 @@ namespace {
         // Tell _CrtDbgReport that no further reporting is required.
         return TRUE;
     }
+    
+#endif
+    
 }
 
 
@@ -6906,6 +6940,7 @@ namespace GEO {
         }
 
         size_t os_used_memory() {
+#ifdef GEO_COMPILER_MSVC
             PROCESS_MEMORY_COUNTERS info;
 #if (PSAPI_VERSION >= 2)
             K32GetProcessMemoryInfo(GetCurrentProcess( ), &info, sizeof(info));            
@@ -6913,9 +6948,13 @@ namespace GEO {
             GetProcessMemoryInfo(GetCurrentProcess( ), &info, sizeof(info));
 #endif            
             return size_t(info.WorkingSetSize);
+#else
+	   return size_t(0);
+#endif	   
         }
 
         size_t os_max_used_memory() {
+#ifdef GEO_COMPILER_MSVC	   
             PROCESS_MEMORY_COUNTERS info;
 #if (PSAPI_VERSION >= 2)
             K32GetProcessMemoryInfo(GetCurrentProcess( ), &info, sizeof(info));            
@@ -6923,9 +6962,13 @@ namespace GEO {
             GetProcessMemoryInfo(GetCurrentProcess( ), &info, sizeof(info));
 #endif            
             return size_t(info.PeakWorkingSetSize);
+#else
+	   return size_t(0);
+#endif	   
         }
 
         bool os_enable_FPE(bool flag) {
+#ifdef GEO_COMPILER_MSVC	    
             if(flag) {
                 unsigned int excepts = 0
                     // | _EM_INEXACT // inexact result
@@ -6940,17 +6983,27 @@ namespace GEO {
                 _controlfp(_MCW_EM, _MCW_EM);
             }
             return true;
+#else
+	    geo_argused(flag);
+	    return false;
+#endif	    
         }
 
         bool os_enable_cancel(bool flag) {
+#ifdef GEO_COMPILER_MSVC	    
             if(flag) {
                 signal(SIGINT, sigint_handler);
             } else {
                 signal(SIGINT, SIG_DFL);
             }
             return true;
+#else
+	    geo_argused(flag);
+	    return false;
+#endif	    
         }
 
+#ifdef GEO_COMPILER_MSVC	
         void os_install_signal_handlers() {
 
             // Install signal handlers
@@ -7016,7 +7069,11 @@ namespace GEO {
             _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
             _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
         }
-
+#else
+        void os_install_signal_handlers() {
+	}
+#endif	
+	
         std::string os_executable_filename() {
             TCHAR result[MAX_PATH];
             GetModuleFileName( NULL, result, MAX_PATH);
@@ -17533,6 +17590,63 @@ inline int aligned_3d_filter( const double* p0, const double* p1, const double* 
 
 
 namespace {
+
+    using namespace GEO;
+    
+    GEO::PCK::SOSMode SOS_mode_ = GEO::PCK::SOS_ADDRESS; // GEO::PCK::SOS_LEXICO; // 
+
+    class LexicoCompare {
+    public:
+
+	LexicoCompare(index_t dim) : dim_(dim) {
+	}
+
+	bool operator()(const double* x, const double* y) const {
+	    for(index_t i=0; i<dim_-1; ++i) {
+		if(x[i] < y[i]) {
+		    return true;
+		}
+		if(x[i] > y[i]) {
+		    return false;
+		}
+	    }
+	    return (x[dim_-1] < y[dim_-1]);
+	}
+    private:
+	index_t dim_;
+    };
+
+    bool lexico_compare_3d(const double* x, const double* y) {
+	if(x[0] < y[0]) {
+	    return true;
+	}
+	if(x[0] > y[0]) {
+	    return false;
+	}
+	if(x[1] < y[1]) {
+	    return true;
+	}
+	if(x[1] > y[1]) {
+	    return false;
+	}
+	return x[2] < y[2];
+    }
+
+    void SOS_sort(const double** begin, const double** end, index_t dim) {
+	if(SOS_mode_ == PCK::SOS_ADDRESS) {
+	    std::sort(begin, end);
+	} else {
+	    if(dim == 3) {
+		std::sort(begin, end, lexico_compare_3d);
+	    } else {
+		std::sort(begin, end, LexicoCompare(dim));
+	    }
+	}
+    }
+    
+}
+
+namespace {
     using namespace GEO;
 
     inline int in_sphere_3d_filter_optim(
@@ -17796,7 +17910,9 @@ namespace {
             p_sort[0] = p0;
             p_sort[1] = p1;
             p_sort[2] = p2;
-            std::sort(p_sort, p_sort + 3);
+	    
+            SOS_sort(p_sort, p_sort + 3, dim);
+	    
             for(index_t i = 0; i < 3; ++i) {
                 if(p_sort[i] == p0) {
                     const expansion& z1 = expansion_diff(Delta, a21);
@@ -17961,7 +18077,7 @@ namespace {
             p_sort[1] = p1;
             p_sort[2] = p2;
             p_sort[3] = p3;
-            std::sort(p_sort, p_sort + 4);
+            SOS_sort(p_sort, p_sort + 4, dim);
             for(index_t i = 0; i < 4; ++i) {
                 if(p_sort[i] == p0) {
                     const expansion& z1_0 = expansion_sum(b01, b02);
@@ -18085,7 +18201,8 @@ namespace {
             p_sort[1] = p1;
             p_sort[2] = p2;
             p_sort[3] = p3;
-            std::sort(p_sort, p_sort + 4);
+
+	    SOS_sort(p_sort, p_sort + 4, 3);
             for(index_t i = 0; i < 4; ++i) {
                 if(p_sort[i] == p0) {
                     const expansion& z1_0 = expansion_sum(b01, b02);
@@ -18293,7 +18410,7 @@ namespace {
             p_sort[2] = p2;
             p_sort[3] = p3;
             p_sort[4] = p4;
-            std::sort(p_sort, p_sort + 5);
+            SOS_sort(p_sort, p_sort + 5, 3);
             for(index_t i = 0; i < 5; ++i) {
                 if(p_sort[i] == p0) {
                     const expansion& z1 = expansion_diff(Delta2, Delta1);
@@ -18446,7 +18563,7 @@ namespace {
             p_sort[2] = p2;
             p_sort[3] = p3;
             p_sort[4] = p4;
-            std::sort(p_sort, p_sort + 5);
+            SOS_sort(p_sort, p_sort + 5, dim);
             for(index_t i = 0; i < 5; ++i) {
                 if(p_sort[i] == p0) {
                     const expansion& z1_0 = expansion_sum3(b01, b02, b03);
@@ -18682,7 +18799,8 @@ namespace {
             p_sort[2] = p2;
             p_sort[3] = p3;
             p_sort[4] = p4;
-            std::sort(p_sort, p_sort + 5);
+
+	    SOS_sort(p_sort, p_sort + 5, 3);
             for(index_t i = 0; i < 5; ++i) {
                 if(p_sort[i] == p0) {
                     const expansion& z1 = expansion_diff(Delta2, Delta1);
@@ -18769,7 +18887,7 @@ namespace {
             p_sort[1] = p1;
             p_sort[2] = p2;
             p_sort[3] = p3;
-            std::sort(p_sort, p_sort + 4);
+            SOS_sort(p_sort, p_sort + 4, 3);
             for(index_t i = 0; i < 4; ++i) {
                 if(p_sort[i] == p0) {
                     const expansion& z1 = expansion_diff(Delta2, Delta1);
@@ -18871,7 +18989,7 @@ namespace {
         if(a == 0 && b == 0) {
             return 0;
         }
-        return double(a * 100) / b;
+        return double(a) * 100.0 / double(b);
     }
 
     void show_stats_plain(
@@ -18934,6 +19052,15 @@ namespace GEO {
 
     namespace PCK {
 
+	void set_SOS_mode(SOSMode m) {
+	    SOS_mode_ = m;
+	}
+
+	SOSMode get_SOS_mode() {
+	    return SOS_mode_;
+	}
+
+	
         Sign side1_SOS(
             const double* p0, const double* p1,
             const double* q0,
@@ -19002,10 +19129,11 @@ namespace GEO {
             const double* p0, const double* p1, 
             const double* p2, const double* p3,
             double h0, double h1, double h2, double h3,            
-            const double* q0, const double* q1, const double* q2
+            const double* q0, const double* q1, const double* q2,
+	    bool SOS
         ) {
             Sign result = Sign(side3h_3d_filter(p0, p1, p2, p3, h0, h1, h2, h3, q0, q1, q2));
-            if(result == ZERO) {
+            if(SOS && result == ZERO) {
                 result = side3h_exact_SOS(p0, p1, p2, p3, h0, h1, h2, h3, q0, q1, q2);
             }
             return result;
@@ -19146,15 +19274,14 @@ namespace GEO {
         Sign GEOGRAM_API in_circle_3dlifted_SOS(
             const double* p0, const double* p1, const double* p2,
             const double* p3,
-            double h0, double h1, double h2, double h3
+            double h0, double h1, double h2, double h3,
+	    bool SOS
         ) {
-//            std::cerr << "calling in_circle_3dlifted_SOS()"
-//                      << std::endl;
             // in_circle_3dlifted is simply implemented using side3_3dlifted.
             // Both predicates are equivalent through duality
             // (see comment in in_circle_3d_SOS(), the same
             //  remark applies).
-            return Sign(-side3_3dlifted_SOS(p0,p1,p2,p3,h0,h1,h2,h3,p0,p1,p2));
+            return Sign(-side3_3dlifted_SOS(p0,p1,p2,p3,h0,h1,h2,h3,p0,p1,p2,SOS));
         }
 
         
@@ -23311,7 +23438,7 @@ namespace GEO {
             }
             geo_debug_assert(work_begin_ != -1);
             geo_debug_assert(work_end_ != -1);
-            return index_t(geo_max(work_end_ - work_begin_ + 1,0));
+            return geo_max(index_t(work_end_ - work_begin_ + 1),index_t(0));
         }
 
         index_t nb_threads() const {

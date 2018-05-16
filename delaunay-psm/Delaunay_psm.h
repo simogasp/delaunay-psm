@@ -108,9 +108,23 @@ typedef int GeoMesh;
 
 typedef unsigned char geo_coord_index_t;
 
+
+// if GARGANTUA is defined, then geogram is compiled with 64 bit indices.
+#ifdef GARGANTUA
+
+#include <stdint.h>
+
+typedef uint64_t geo_index_t;
+
+typedef int64_t geo_signed_index_t;
+
+#else
+
 typedef unsigned int geo_index_t;
 
 typedef int geo_signed_index_t;
+
+#endif
 
 typedef double geo_coord_t;
 
@@ -200,8 +214,8 @@ namespace GEO {
 
 #if defined(_MSC_VER)
 #  define GEO_COMPILER_MSVC
-#else
-#  error "Unsupported compiler"
+#elif defined(__MINGW32__) || defined(__MINGW64__)
+#  define GEO_COMPILER_MINGW
 #endif
 
 #if defined(_WIN64)
@@ -247,9 +261,11 @@ namespace GEO {
 
 // =============================== Unsupported =============================
 #else
-
 #error "Unsupported operating system"
+#endif
 
+#if defined(GEO_COMPILER_GCC) || defined(GEO_COMPILER_CLANG) || defined(GEO_COMPILER_MINGW)
+#define GEO_COMPILER_GCC_FAMILY
 #endif
 
 #ifdef DOXYGEN_ONLY
@@ -735,7 +751,7 @@ namespace GEO {
             free(p);
 #elif defined(GEO_COMPILER_INTEL)
             _mm_free(p);
-#elif defined(GEO_COMPILER_GCC) || defined(GEO_COMPILER_CLANG)
+#elif defined(GEO_COMPILER_GCC_FAMILY) 
             free(p);
 #elif defined(GEO_COMPILER_MSVC)
             _aligned_free(p);
@@ -748,7 +764,7 @@ namespace GEO {
 #define geo_decl_aligned(var) var
 #elif defined(GEO_COMPILER_INTEL)
 #define geo_decl_aligned(var) __declspec(aligned(GEO_MEMORY_ALIGNMENT)) var
-#elif defined(GEO_COMPILER_GCC) || defined(GEO_COMPILER_CLANG)
+#elif defined(GEO_COMPILER_GCC_FAMILY)
 #define geo_decl_aligned(var) var __attribute__((aligned(GEO_MEMORY_ALIGNMENT)))
 #elif defined(GEO_COMPILER_MSVC)
 #define geo_decl_aligned(var) __declspec(align(GEO_MEMORY_ALIGNMENT)) var
@@ -775,16 +791,18 @@ namespace GEO {
 #else
 #define geo_assume_aligned(var, alignment)        
 #endif        
-#elif defined(GEO_COMPILER_MSVC)
+#elif defined(GEO_COMPILER_MSVC) 
 #define geo_assume_aligned(var, alignment)
         // TODO: I do not know how to do that with MSVC
 #elif defined(GEO_COMPILER_EMSCRIPTEN)        
+#define geo_assume_aligned(var, alignment)
+#elif defined(GEO_COMPILER_MINGW)        
 #define geo_assume_aligned(var, alignment)
 #endif
 
 #if   defined(GEO_COMPILER_INTEL)
 #define geo_restrict __restrict
-#elif defined(GEO_COMPILER_GCC) || defined(GEO_COMPILER_CLANG)
+#elif defined(GEO_COMPILER_GCC_FAMILY)
 #define geo_restrict __restrict__
 #elif defined(GEO_COMPILER_MSVC)
 #define geo_restrict __restrict
@@ -945,6 +963,30 @@ namespace GEO {
             return baseclass::operator[] (index_t(i));
         }
 
+
+#ifdef GARGANTUA // If compiled with 64 bits index_t
+
+        T& operator[] (int i) {
+            geo_debug_assert(i >= 0 && index_t(i) < size());
+            return baseclass::operator[] (index_t(i));
+        }
+
+        const T& operator[] (int i) const {
+            geo_debug_assert(i >= 0 && index_t(i) < size());
+            return baseclass::operator[] (index_t(i));
+        }
+
+        T& operator[] (unsigned int i) {
+            geo_debug_assert(i >= 0 && index_t(i) < size());
+            return baseclass::operator[] (index_t(i));
+        }
+
+        const T& operator[] (unsigned int i) const {
+            geo_debug_assert(i >= 0 && index_t(i) < size());
+            return baseclass::operator[] (index_t(i));
+        }
+#endif	
+	
         T* data() {
             return size() == 0 ? nil : &(*this)[0];
         }
@@ -2084,7 +2126,7 @@ namespace GEO {
                 geo_thread_sync_assert(i < size());
                 index_t w = i >> 5;
                 index_t b = i & 31;
-                while(atomic_bittestandset_x86(&spinlocks_[w], b)) {
+                while(atomic_bittestandset_x86(&spinlocks_[w], Numeric::uint32(b))) {
                     // Intel recommends to have a PAUSE asm instruction
                     // in the spinlock loop. It is generated using the
                     // following intrinsic function of GCC.
@@ -2098,7 +2140,7 @@ namespace GEO {
                 index_t b = i & 31;
                 // Note: we need here to use a synchronized bit reset
                 // since &= is not atomic.
-                atomic_bittestandreset_x86(&spinlocks_[w], b);
+                atomic_bittestandreset_x86(&spinlocks_[w], Numeric::uint32(b));
             }
 
         private:
@@ -2425,7 +2467,7 @@ namespace GEO {
 namespace GEO {
 
 
-#if defined(GEO_COMPILER_GCC) || defined(GEO_COMPILER_CLANG)
+#if defined(GEO_COMPILER_GCC_FAMILY) 
 #define GEO_THREAD_LOCAL __thread
 #elif defined(GEO_COMPILER_MSVC) || defined(GEO_COMPILER_INTEL)
 #define GEO_THREAD_LOCAL __declspec(thread)
@@ -2629,7 +2671,7 @@ namespace GEO {
             Process::maximum_concurrent_threads() * threads_per_core
         );
 
-	nb_threads = geo_max(1u, nb_threads);
+	nb_threads = geo_max(index_t(1), nb_threads);
 	
         index_t batch_size = (to - from) / nb_threads;
         if(Process::is_running_threads() || nb_threads == 1) {
@@ -4478,6 +4520,12 @@ namespace GEO {
 
     namespace PCK {
 
+	enum SOSMode {SOS_ADDRESS, SOS_LEXICO };
+
+	void GEOGRAM_API set_SOS_mode(SOSMode m);
+
+	SOSMode GEOGRAM_API get_SOS_mode();
+	
         Sign GEOGRAM_API side1_SOS(
             const double* p0, const double* p1,
             const double* q0,
@@ -4501,7 +4549,8 @@ namespace GEO {
             const double* p0, const double* p1, 
             const double* p2, const double* p3,
             double h0, double h1, double h2, double h3,
-            const double* q0, const double* q1, const double* q2
+            const double* q0, const double* q1, const double* q2,
+	    bool SOS=true
         );
         
         Sign GEOGRAM_API side4_SOS(
@@ -4547,7 +4596,8 @@ namespace GEO {
         Sign GEOGRAM_API in_circle_3dlifted_SOS(
             const double* p0, const double* p1, const double* p2,
             const double* p3,
-            double h0, double h1, double h2, double h3
+            double h0, double h1, double h2, double h3,
+	    bool SOS=true
         );
         
         Sign GEOGRAM_API orient_2d(
@@ -5620,9 +5670,9 @@ namespace GEO {
             const signed_index_t* cell_to_v, const signed_index_t* cell_to_cell
         );
 
-        void update_v_to_cell();
+        virtual void update_v_to_cell();
 
-        void update_cicl();
+        virtual void update_cicl();
 
         virtual void update_neighbors();
 
