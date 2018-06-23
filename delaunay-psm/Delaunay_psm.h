@@ -108,8 +108,10 @@ typedef int GeoMesh;
 
 typedef unsigned char geo_coord_index_t;
 
-
-// if GARGANTUA is defined, then geogram is compiled with 64 bit indices.
+/* 
+ * If GARGANTUA is defined, then geogram is compiled 
+ * with 64 bit indices. 
+ */
 #ifdef GARGANTUA
 
 #include <stdint.h>
@@ -152,7 +154,12 @@ enum {
 
 namespace GEO {
 
-    void GEOGRAM_API initialize();
+    enum {
+	GEOGRAM_NO_HANDLER = 0,
+	GEOGRAM_INSTALL_HANDLERS = 1
+    };
+    
+    void GEOGRAM_API initialize(int flags = GEOGRAM_INSTALL_HANDLERS);
 
     void GEOGRAM_API terminate();
 }
@@ -204,7 +211,7 @@ namespace GEO {
 
 // =============================== WINDOWS defines =========================
 
-#elif defined(WIN32) || defined(_WIN64)
+#elif defined(_WIN32) || defined(_WIN64)
 
 #define GEO_OS_WINDOWS
 
@@ -425,6 +432,7 @@ namespace GEO {
 #include <cmath>
 #include <float.h>
 #include <limits.h>
+#include <algorithm> // for std::min / std::max
 
 // Visual C++ ver. < 2010 does not have C99 stdint.h,
 // using a fallback portable one.
@@ -531,16 +539,6 @@ namespace GEO {
 
     
 
-    template <class T>
-    inline T geo_max(T x1, T x2) {
-        return x1 < x2 ? x2 : x1;
-    }
-
-    template <class T>
-    inline T geo_min(T x1, T x2) {
-        return x2 < x1 ? x2 : x1;
-    }
-
     enum Sign {
         
         NEGATIVE = -1,
@@ -558,11 +556,6 @@ namespace GEO {
     }
 
     template <class T>
-    inline T geo_abs(T x) {
-        return (x < 0) ? -x : x;
-    }
-
-    template <class T>
     inline T geo_sqr(T x) {
         return x * x;
     }
@@ -574,13 +567,6 @@ namespace GEO {
         } else if(x > max) {
             x = max;
         }
-    }
-
-    template <class T>
-    inline void geo_swap(T& x, T& y) {
-        T z = x;
-        x = y;
-        y = z;
     }
 
     typedef geo_index_t index_t;
@@ -656,8 +642,6 @@ namespace GEO {
 	
 	typedef void (*function_pointer)();
 	
-#define nil 0
-
         inline void clear(void* addr, size_t size) {
             ::memset(addr, 0, size);
         }
@@ -669,7 +653,7 @@ namespace GEO {
 	inline pointer function_pointer_to_generic_pointer(function_pointer fptr) {
 	    // I know this is ugly, but I did not find a simpler warning-free
 	    // way that is portable between all compilers.
-	    pointer result = nil;
+	    pointer result = nullptr;
 	    ::memcpy(&result, &fptr, sizeof(pointer));
 	    return result;
 	}
@@ -677,7 +661,7 @@ namespace GEO {
 	inline function_pointer generic_pointer_to_function_pointer(pointer ptr) {
 	    // I know this is ugly, but I did not find a simpler warning-free
 	    // way that is portable between all compilers.
-	    function_pointer result = nil;
+	    function_pointer result = nullptr;
 	    ::memcpy(&result, &ptr, sizeof(pointer));
 	    return result;
 	}
@@ -685,7 +669,7 @@ namespace GEO {
 	inline function_pointer generic_pointer_to_function_pointer(void* ptr) {
 	    // I know this is ugly, but I did not find a simpler warning-free
 	    // way that is portable between all compilers.
-	    function_pointer result = nil;
+	    function_pointer result = nullptr;
 	    ::memcpy(&result, &ptr, sizeof(pointer));
 	    return result;
 	}
@@ -736,7 +720,7 @@ namespace GEO {
 #elif defined(GEO_COMPILER_GCC) || defined(GEO_COMPILER_CLANG)
             void* result;
             return posix_memalign(&result, alignment, size) == 0
-                   ? result : 0;
+                   ? result : nullptr;
 #elif defined(GEO_COMPILER_MSVC)
             return _aligned_malloc(size, alignment);
 #else
@@ -866,7 +850,7 @@ namespace GEO {
             }
 
             pointer allocate(
-                size_type nb_elt, ::std::allocator<void>::const_pointer hint = 0
+                size_type nb_elt, ::std::allocator<void>::const_pointer hint = nullptr
             ) {
                 geo_argused(hint);
                 pointer result = static_cast<pointer>(
@@ -988,11 +972,11 @@ namespace GEO {
 #endif	
 	
         T* data() {
-            return size() == 0 ? nil : &(*this)[0];
+            return size() == 0 ? nullptr : &(*this)[0];
         }
 
         const T* data() const {
-            return size() == 0 ? nil : &(*this)[0];
+            return size() == 0 ? nullptr : &(*this)[0];
         }
 
     };
@@ -1062,13 +1046,13 @@ namespace GEO {
         }
 
         static void ref(const Counted* counted) {
-            if(counted != nil) {
+            if(counted != nullptr) {
                 counted->ref();
             }
         }
 
         static void unref(const Counted* counted) {
-            if(counted != nil) {
+            if(counted != nullptr) {
                 counted->unref();
             }
         }
@@ -1108,7 +1092,7 @@ namespace GEO {
     class SmartPointer {
     public:
         SmartPointer() :
-            pointer_(nil) {
+            pointer_(nullptr) {
         }
 
         SmartPointer(T* ptr) :
@@ -1146,16 +1130,16 @@ namespace GEO {
 
         void reset() {
             T::unref(pointer_);
-            pointer_ = nil;
+            pointer_ = nullptr;
         }
 
         T* operator-> () const {
-            geo_assert(pointer_ != nil);
+            geo_assert(pointer_ != nullptr);
             return pointer_;
         }
 
         T& operator* () const {
-            geo_assert(pointer_ != nil);
+            geo_assert(pointer_ != nullptr);
             return *pointer_;
         }
 
@@ -1167,8 +1151,8 @@ namespace GEO {
             return pointer_;
         }
 
-        bool is_nil() const {
-            return pointer_ == nil;
+        bool is_null() const {
+            return pointer_ == nullptr;
         }
 
     private:
@@ -2292,7 +2276,7 @@ namespace GEO {
             bool lock = true
         ) {
             if(array.size() == 0) {
-                set_array(array_index, 0, nil, lock);
+                set_array(array_index, 0, nullptr, lock);
             } else {
                 set_array(
                     array_index, index_t(array.size()), &array[0], lock
@@ -2320,7 +2304,7 @@ namespace GEO {
 
     protected:
         bool static_mode() const {
-            return ZV_ == nil;
+            return ZV_ == nullptr;
         }
 
     private:
@@ -2579,7 +2563,7 @@ namespace GEO {
 
     namespace Process {
 
-        void GEOGRAM_API initialize();
+        void GEOGRAM_API initialize(int flags);
 
         void GEOGRAM_API terminate();
 
@@ -2666,12 +2650,12 @@ namespace GEO {
         threads_per_core = 1;
 #endif
 
-        index_t nb_threads = geo_min(
+        index_t nb_threads = std::min(
             to - from,
             Process::maximum_concurrent_threads() * threads_per_core
         );
 
-	nb_threads = geo_max(index_t(1), nb_threads);
+	nb_threads = std::max(index_t(1), nb_threads);
 	
         index_t batch_size = (to - from) / nb_threads;
         if(Process::is_running_threads() || nb_threads == 1) {
@@ -2862,7 +2846,7 @@ namespace GEO {
         static InstanceType& instance() {
             const std::string name = typeid(InstanceType).name();
             Instance* instance = get(name);
-            if(instance == nil) {
+            if(instance == nullptr) {
                 instance = new InstanceType;
                 add(name, instance);
             }
@@ -2891,23 +2875,21 @@ namespace GEO {
 
         static CreatorType find_creator(const std::string& name) {
             Factory& self = instance();
-            typename Registry::const_iterator i = self.registry_.find(name);
-            return i == self.registry_.end() ? nil : i->second;
+            auto i = self.registry_.find(name);
+            return i == self.registry_.end() ? nullptr : i->second;
         }
 
         static void list_creators(std::vector<std::string>& names) {
             Factory& self = instance();
-            typename Registry::const_iterator i;
-            for(i = self.registry_.begin(); i != self.registry_.end(); ++i) {
-                names.push_back(i->first);
+            for(auto& it : self.registry_) {
+                names.push_back(it.first);
             }
         }
 
         static bool has_creator(const std::string& name) {
             Factory& self = instance();
-            typename Registry::const_iterator i;
-            for(i = self.registry_.begin(); i != self.registry_.end(); ++i) {
-                if(i->first == name) {
+            for(auto& it : self.registry_) {
+                if(it.first == name) {
                     return true;
                 }
             }
@@ -2952,7 +2934,7 @@ namespace GEO {
         static Type* create_object(const std::string& name) {
             typename BaseClass::CreatorType creator =
                 BaseClass::find_creator(name);
-            return creator == nil ? nil : (* creator)();
+            return creator == nullptr ? nullptr : (* creator)();
         }
     };
 
@@ -2974,7 +2956,7 @@ namespace GEO {
         static Type* create_object(const std::string& name, const Param1& param1) {
             typename BaseClass::CreatorType creator =
                 BaseClass::find_creator(name);
-            return creator == nil ? nil : (* creator)(param1);
+            return creator == nullptr ? nullptr : (* creator)(param1);
         }
     };
 
@@ -3018,12 +3000,6 @@ namespace GEO {
             }
         }
 
-        vecng(const vecng<DIM,T>& rhs) {
-            for(index_t i = 0; i < DIM; i++) {
-                data_[i] = rhs.data_[i];
-            }
-        }
-        
         // This one should never be called :
         // a template constructor cannot be a copy constructor
 
@@ -3050,11 +3026,6 @@ namespace GEO {
             for(index_t i = 0; i < DIM; i++) {
                 data_[i] = T(v[i]);
             }
-        }
-
-        vector_type& operator= (const vector_type& v) {
-            memcpy(data_, v.data(), DIM * sizeof(T));
-            return *this;
         }
 
         index_t dimension() const {
@@ -4500,8 +4471,8 @@ namespace GEO {
 
     inline void bbox_union(Box& target, const Box& B1, const Box& B2) {
         for(coord_index_t c = 0; c < 3; ++c) {
-            target.xyz_min[c] = geo_min(B1.xyz_min[c], B2.xyz_min[c]);
-            target.xyz_max[c] = geo_max(B1.xyz_max[c], B2.xyz_max[c]);
+            target.xyz_min[c] = std::min(B1.xyz_min[c], B2.xyz_min[c]);
+            target.xyz_max[c] = std::max(B1.xyz_max[c], B2.xyz_max[c]);
         }
     }
 }
