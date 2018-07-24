@@ -1361,7 +1361,7 @@ namespace GEO {
     class NO_GEOGRAM_API LoggerStreamBuf : public std::stringbuf {
     public:
         LoggerStreamBuf(LoggerStream* loggerStream) :
-            loggerStream_(loggerStream) {
+  	loggerStream_(loggerStream) {
         }
 
     private:
@@ -1571,8 +1571,10 @@ namespace GEO {
         bool quiet_;
         bool pretty_;
         bool minimal_;
+	bool notifying_error_;
         
         friend class LoggerStream;
+        friend class LoggerStreamBuf;
     };
 
     

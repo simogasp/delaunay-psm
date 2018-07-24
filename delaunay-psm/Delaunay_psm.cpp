@@ -1712,6 +1712,8 @@ namespace GEO {
 
 
         std::string GEOGRAM_API home_directory();
+
+        std::string GEOGRAM_API documents_directory();
     }
 }
 
@@ -4007,7 +4009,7 @@ namespace GEO {
     }
 
     void LoggerStream::notify(const std::string& str) {
-        logger_->notify(this, str);
+	logger_->notify(this, str);
     }
 
     
@@ -4257,6 +4259,7 @@ namespace GEO {
         pretty_ = flag;
     }
 
+
     Logger::Logger() :
         out_(this),
         warn_(this),
@@ -4266,7 +4269,8 @@ namespace GEO {
         current_feature_changed_(false),
         quiet_(true),
         pretty_(true),
-        minimal_(false)
+        minimal_(false),
+	notifying_error_(false)
     {
         // Add a default client printing stuff to std::cout
         register_client(new ConsoleLogger());
@@ -4279,7 +4283,8 @@ namespace GEO {
     }
 
     Logger* Logger::instance() {
-        // Do not use geo_assert here: if the instance is nullptr, geo_assert will
+        // Do not use geo_assert here:
+	//  if the instance is nullptr, geo_assert will
         // call the Logger to print the assertion failure, thus ending in a
         // infinite loop.
         if(instance_ == nullptr) {
@@ -4292,33 +4297,42 @@ namespace GEO {
     }
 
     std::ostream& Logger::div(const std::string& title) {
-        return is_initialized() ?
+	std::ostream& result = is_initialized() ?
             instance()->div_stream(title) :
             (std::cerr << "=====" << title << std::endl);
+	return result;
     }
 
     std::ostream& Logger::out(const std::string& feature) {
-        return is_initialized() ?
+	std::ostream& result =
+	    (is_initialized() && !Process::is_running_threads()) ?
             instance()->out_stream(feature) :
             (std::cerr << "    [" << feature << "] ");
+	return result;
     }
 
     std::ostream& Logger::err(const std::string& feature) {
-        return is_initialized() ?
+	std::ostream& result = 
+	    (is_initialized() && !Process::is_running_threads()) ?	    
             instance()->err_stream(feature) :
             (std::cerr << "(E)-[" << feature << "] ");
+	return result;
     }
 
     std::ostream& Logger::warn(const std::string& feature) {
-        return is_initialized() ?
+	std::ostream& result = 
+	    (is_initialized() && !Process::is_running_threads()) ?	    	    
             instance()->warn_stream(feature) :
             (std::cerr << "(W)-[" << feature << "] ");
+	return result;
     }
 
     std::ostream& Logger::status() {
-        return is_initialized() ?
+	std::ostream& result =	
+	    (is_initialized() && !Process::is_running_threads()) ?	    	    	
             instance()->status_stream() :
             (std::cerr << "[status] ");
+	return result;
     }
 
     std::ostream& Logger::div_stream(const std::string& title) {
@@ -4399,10 +4413,17 @@ namespace GEO {
             CmdLine::ui_feature(current_feature_, current_feature_changed_)
             + msg;
 
-        for(auto it : clients_) {
-            it->err(feat_msg);
-            it->status(msg);
-        }
+	if(notifying_error_) {
+	    std::cerr << "Error while displaying error (!):"
+		      << feat_msg << std::endl;
+	} else {
+	    notifying_error_ = true;
+	    for(auto it : clients_) {
+		it->err(feat_msg);
+		it->status(msg);
+	    }
+	    notifying_error_ = false;
+	}
 
         current_feature_changed_ = false;
     }
@@ -5100,7 +5121,7 @@ namespace GEO {
             std::string home;
 #if defined GEO_OS_WINDOWS
             wchar_t folder[MAX_PATH+1];
-            HRESULT hr = SHGetFolderPathW(0, CSIDL_MYDOCUMENTS, 0, 0, folder);
+            HRESULT hr = SHGetFolderPathW(0, CSIDL_PROFILE, 0, 0, folder);
             if (SUCCEEDED(hr)) {
                 char result[MAX_PATH+1];
                 wcstombs(result, folder, MAX_PATH);
@@ -5118,6 +5139,27 @@ namespace GEO {
             return home;
         }
 
+        std::string documents_directory() {
+            std::string home;
+#if defined GEO_OS_WINDOWS
+            wchar_t folder[MAX_PATH+1];
+            HRESULT hr = SHGetFolderPathW(0, CSIDL_MYDOCUMENTS, 0, 0, folder);
+            if (SUCCEEDED(hr)) {
+                char result[MAX_PATH+1];
+                wcstombs(result, folder, MAX_PATH);
+                home=std::string(result);
+                flip_slashes(home);
+            }
+#elif defined GEO_OS_EMSCRIPTEN
+            home="/";
+#else            
+            char* result = getenv("HOME");
+            if(result != nullptr) {
+                home=result;
+            }
+#endif
+            return home;
+        }
         
     }
 
@@ -5888,7 +5930,14 @@ namespace GEO {
         }
 
         bool is_running_threads() {
+#ifdef GEO_OPENMP
+            return (
+		omp_in_parallel() ||
+		(running_threads_invocations_ > 0)
+	    );	    
+#else	    
             return running_threads_invocations_ > 0;
+#endif	    
         }
 
         bool multithreading_enabled() {
@@ -17665,12 +17714,6 @@ namespace {
 
 #ifdef __AVX2__
 
-    inline int avx_permute_mask(int a0, int a1, int a2, int a3) {
-	return a0 | (a1 << 2) | (a2 << 4) | (a3 << 6);
-    }
-
-    // To be replaced with _MM_SHUFFLE(a3,a2,a1,a0) (note: reverse arg order !)
-    
     inline __m256d avx2_vecdet(__m256d A, __m256d B, __m256d C, __m256d D) {
 	__m256d AD = _mm256_mul_pd(A,D);
 	__m256d BC = _mm256_mul_pd(B,C);
@@ -17686,16 +17729,16 @@ namespace {
 	// We develop w.r.t. the first column and
 	// compute the 4 minors simultaneously.
 	
-	__m256d C41 = _mm256_permute4x64_pd(C11, avx_permute_mask(3,0,1,2));
+	__m256d C41 = _mm256_permute4x64_pd(C11, _MM_SHUFFLE(2,1,0,3)); 
 	
-	__m256d C22 = _mm256_permute4x64_pd(C12, avx_permute_mask(1,2,3,0));
-	__m256d C32 = _mm256_permute4x64_pd(C12, avx_permute_mask(2,3,0,1));	
+	__m256d C22 = _mm256_permute4x64_pd(C12, _MM_SHUFFLE(0,3,2,1)); 
+	__m256d C32 = _mm256_permute4x64_pd(C12, _MM_SHUFFLE(1,0,3,2)); 
 
-	__m256d C23 = _mm256_permute4x64_pd(C13, avx_permute_mask(1,2,3,0));
-	__m256d C33 = _mm256_permute4x64_pd(C13, avx_permute_mask(2,3,0,1));	
+	__m256d C23 = _mm256_permute4x64_pd(C13, _MM_SHUFFLE(0,3,2,1)); 
+	__m256d C33 = _mm256_permute4x64_pd(C13, _MM_SHUFFLE(1,0,3,2)); 
 
-	__m256d C24 = _mm256_permute4x64_pd(C14, avx_permute_mask(1,2,3,0));
-	__m256d C34 = _mm256_permute4x64_pd(C14, avx_permute_mask(2,3,0,1));
+        __m256d C24 = _mm256_permute4x64_pd(C14, _MM_SHUFFLE(0,3,2,1)); 
+        __m256d C34 = _mm256_permute4x64_pd(C14, _MM_SHUFFLE(1,0,3,2)); 
 	
 	__m256d M1 = _mm256_mul_pd(C12,avx2_vecdet(C23,C24,C33,C34));	
 	__m256d M2 = _mm256_mul_pd(C22,avx2_vecdet(C13,C14,C33,C34));
@@ -17710,7 +17753,7 @@ namespace {
 	M = _mm256_mul_pd(M, C41);
 
 	// Compute -m0 +m1 -m2 +m3
-	M = _mm256_permute4x64_pd(M, avx_permute_mask(1,3,0,2));
+	M = _mm256_permute4x64_pd(M, _MM_SHUFFLE(2,0,3,1)); 
 	__m128d M_a = _mm256_extractf128_pd(M, 0);
 	__m128d M_b = _mm256_extractf128_pd(M, 1);
 	__m128d Mab = _mm_sub_pd(M_a,M_b);
@@ -25881,9 +25924,6 @@ namespace GEO {
         delete W;
 
         if(debug_mode_) {
-//            Delaunay3dThread* thread0 = 
-//                static_cast<Delaunay3dThread*>(threads_[0].get());
-            
             for(index_t i=0; i<threads_.size(); ++i) {
                 std::cerr << i << " : " <<
                     static_cast<Delaunay3dThread*>(threads_[i].get())
