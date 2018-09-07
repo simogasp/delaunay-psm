@@ -1614,8 +1614,10 @@ extern int GEOGRAM_API geogram_fprintf(FILE* out, const char* format, ...);
 #ifdef GEO_OS_LINUX
 #  if defined(GEO_OS_EMSCRIPTEN) 
 #    define GEO_USE_DUMMY_ATOMICS
-#  elif defined(GEO_OS_ANDROID) || defined(GEO_OS_RASPBERRY)
-#    define GEO_USE_ARM_ATOMICS
+#  elif defined(GEO_OS_RASPBERRY)
+#    define GEO_USE_ARM32_ATOMICS
+#  elif defined(GEO_OS_ANDROID)
+#    define GEO_USE_ANDROID_ATOMICS
 #  else
 #    define GEO_USE_X86_ATOMICS
 #  endif
@@ -1634,46 +1636,46 @@ inline char atomic_bittestandreset_x86(volatile unsigned int*, unsigned int) {
     return 0;
 }
 
-#elif defined(GEO_USE_ARM_ATOMICS)
+#elif defined(GEO_USE_ANDROID_ATOMICS)
 
 
-typedef GEO::Numeric::uint32 arm_mutex_t;
+typedef GEO::Numeric::uint32 android_mutex_t;
 
-
-#ifdef __aarch64__
-
-inline void lock_mutex_arm(volatile arm_mutex_t* lock) {
+inline void lock_mutex_android(volatile android_mutex_t* lock) {
     while(__sync_lock_test_and_set(lock, 1) != 0);
 }
 
-inline void unlock_mutex_arm(volatile arm_mutex_t* lock) {
+inline void unlock_mutex_android(volatile android_mutex_t* lock) {
     __sync_lock_release(lock);
 }
 
-inline unsigned int atomic_bitset_arm(volatile unsigned int* ptr, unsigned int bit) {
+inline unsigned int atomic_bitset_android(volatile unsigned int* ptr, unsigned int bit) {
     return __sync_fetch_and_or(ptr, 1u << bit) & (1u << bit);
 }
 
-inline unsigned int atomic_bitreset_arm(volatile unsigned int* ptr, unsigned int bit) {
+inline unsigned int atomic_bitreset_android(volatile unsigned int* ptr, unsigned int bit) {
     return __sync_fetch_and_and(ptr, ~(1u << bit)) & (1u << bit);
 }
 
-inline void memory_barrier_arm() {
+inline void memory_barrier_android() {
     // Full memory barrier.
     __sync_synchronize();
 }
 
-inline void wait_for_event_arm() {
+inline void wait_for_event_android() {
     /* TODO */    
 }
 
-inline void send_event_arm() {
+inline void send_event_android() {
     /* TODO */    
 }
 
-#else
+#elif defined(GEO_USE_ARM32_ATOMICS)
 
-inline void lock_mutex_arm(volatile arm_mutex_t* lock) {
+
+typedef GEO::Numeric::uint32 arm32_mutex_t;
+
+inline void lock_mutex_arm32(volatile arm32_mutex_t* lock) {
     arm_mutex_t tmp;
     __asm__ __volatile__ (
         "1:     ldrex   %0, [%1]     \n" // read lock
@@ -1688,7 +1690,7 @@ inline void lock_mutex_arm(volatile arm_mutex_t* lock) {
         : "cc", "memory");
 }
 
-inline void unlock_mutex_arm(volatile arm_mutex_t* lock) {
+inline void unlock_mutex_arm32(volatile arm32_mutex_t* lock) {
     __asm__ __volatile__ (
         "       dmb              \n" // ensure all previous access are observed
         "       str     %1, [%0] \n" // clear the lock
@@ -1699,7 +1701,7 @@ inline void unlock_mutex_arm(volatile arm_mutex_t* lock) {
         : "cc", "memory");
 }
 
-inline unsigned int atomic_bitset_arm(volatile unsigned int* ptr, unsigned int bit) {
+inline unsigned int atomic_bitset_arm32(volatile unsigned int* ptr, unsigned int bit) {
     unsigned int tmp;
     unsigned int result;
     unsigned int OK;
@@ -1717,7 +1719,7 @@ inline unsigned int atomic_bitset_arm(volatile unsigned int* ptr, unsigned int b
     return result;
 }
 
-inline unsigned int atomic_bitreset_arm(volatile unsigned int* ptr, unsigned int bit) {
+inline unsigned int atomic_bitreset_arm32(volatile unsigned int* ptr, unsigned int bit) {
     unsigned int tmp;
     unsigned int result;
     unsigned int OK;
@@ -1735,29 +1737,27 @@ inline unsigned int atomic_bitreset_arm(volatile unsigned int* ptr, unsigned int
     return result;
 }
 
-inline void memory_barrier_arm() {
+inline void memory_barrier_arm32() {
     __asm__ __volatile__ (
         "dmb \n"
         : : : "memory"
     );
 }
 
-inline void wait_for_event_arm() {
+inline void wait_for_event_arm32() {
     __asm__ __volatile__ (
         "wfe \n"
         : : : 
     );
 }
 
-inline void send_event_arm() {
+inline void send_event_arm32() {
     __asm__ __volatile__ (
         "dsb \n" // ensure completion of store operations
         "sev \n"
         : : : 
     );
 }
-
-#endif
 
 #elif defined(GEO_USE_X86_ATOMICS)
 
@@ -1876,22 +1876,37 @@ namespace GEO {
 
     namespace Process {
 
-#if defined(GEO_OS_ANDROID) || defined(GEO_OS_RASPBERRY)
+#if defined(GEO_OS_RASPBERRY)
 
         
-        typedef arm_mutex_t spinlock;
+        typedef arm32_mutex_t spinlock;
 
         
 #       define GEOGRAM_SPINLOCK_INIT 0
         inline void acquire_spinlock(spinlock& x) {
-            lock_mutex_arm(&x);
+            lock_mutex_arm32(&x);
         }
 
         inline void release_spinlock(spinlock& x) {
-            unlock_mutex_arm(&x);
+            unlock_mutex_arm32(&x);
+        }
+	
+#elif defined(GEO_OS_ANDROID)
+
+        
+        typedef android_mutex_t spinlock;
+
+        
+#       define GEOGRAM_SPINLOCK_INIT 0
+        inline void acquire_spinlock(spinlock& x) {
+            lock_mutex_android(&x);
         }
 
-#elif defined(GEO_OS_LINUX) && !defined(GEO_OS_RASPBERRY)
+        inline void release_spinlock(spinlock& x) {
+            unlock_mutex_android(&x);
+        }
+
+#elif defined(GEO_OS_LINUX) 
 
         
         typedef unsigned char spinlock;
@@ -2018,7 +2033,7 @@ namespace GEO {
             std::vector<spinlock> spinlocks_;
         };
 
-#elif defined(GEO_OS_ANDROID) || defined(GEO_OS_RASPBERRY)
+#elif defined(GEO_OS_RASPBERRY) 
 
         class SpinLockArray {
         public:
@@ -2052,26 +2067,87 @@ namespace GEO {
                 index_t w = i >> 5;
                 word_t b = word_t(i & 31);
                 // Loop while previously stored value has its bit set.
-                while((atomic_bitset_arm(&spinlocks_[w], b)) != 0) {
+                while((atomic_bitset_arm32(&spinlocks_[w], b)) != 0) {
                     // If somebody else has the lock, sleep.
-                    //  It is important to sleep here, else atomic_bitset_arm()
+                    //  It is important to sleep here, else atomic_bitset_xxx()
                     // keeps acquiring the exclusive monitor (even for testing)
                     // and this slows down everything.
-                    wait_for_event_arm();
+                    wait_for_event_arm32();
                 }
-                memory_barrier_arm();
+                memory_barrier_arm32();
             }
 
             void release_spinlock(index_t i) {
                 geo_thread_sync_assert(i < size());
-                memory_barrier_arm();
+                memory_barrier_android();
                 index_t w = i >> 5;
                 word_t b = word_t(i & 31);
-                atomic_bitreset_arm(&spinlocks_[w], b);
+                atomic_bitreset_arm32(&spinlocks_[w], b);
                 //   Now wake up the other threads that started
                 // sleeping if they did not manage to acquire
                 // the lock.
-                send_event_arm();
+                send_event_arm32();
+            }
+
+        private:
+            std::vector<word_t> spinlocks_;
+            index_t size_;
+        };
+	
+#elif defined(GEO_OS_ANDROID) 
+
+        class SpinLockArray {
+        public:
+            typedef Numeric::uint32 word_t;
+
+            SpinLockArray() : size_(0) {
+            }
+
+            SpinLockArray(index_t size_in) : size_(0) {
+                resize(size_in);
+            }
+
+            void resize(index_t size_in) {
+                if(size_ != size_in) {
+                    size_ = size_in;
+                    index_t nb_words = (size_ >> 5) + 1;
+                    spinlocks_.assign(nb_words, 0);
+                }
+            }
+
+            index_t size() const {
+                return size_;
+            }
+
+            void clear() {
+                spinlocks_.clear();
+            }
+
+            void acquire_spinlock(index_t i) {
+                geo_thread_sync_assert(i < size());
+                index_t w = i >> 5;
+                word_t b = word_t(i & 31);
+                // Loop while previously stored value has its bit set.
+                while((atomic_bitset_android(&spinlocks_[w], b)) != 0) {
+                    // If somebody else has the lock, sleep.
+                    //  It is important to sleep here, else atomic_bitset_xxx()
+                    // keeps acquiring the exclusive monitor (even for testing)
+                    // and this slows down everything.
+                    wait_for_event_android();
+                }
+                memory_barrier_android();
+            }
+
+            void release_spinlock(index_t i) {
+                geo_thread_sync_assert(i < size());
+                memory_barrier_android();
+                index_t w = i >> 5;
+                word_t b = word_t(i & 31);
+                atomic_bitreset_android(&spinlocks_[w], b);
+                //   Now wake up the other threads that started
+                // sleeping if they did not manage to acquire
+                // the lock.
+                send_event_android();
             }
 
         private:
@@ -2079,7 +2155,7 @@ namespace GEO {
             index_t size_;
         };
 
-#elif defined(GEO_OS_LINUX) && !defined(GEO_OS_RASPBERRY)
+#elif defined(GEO_OS_LINUX) 
 
         class SpinLockArray {
         public:
@@ -2204,6 +2280,67 @@ namespace GEO {
 
 
     }
+
+#ifdef GEO_OS_WINDOWS
+
+    // Emulation of pthread mutexes using Windows API
+
+    typedef CRITICAL_SECTION pthread_mutex_t;
+    typedef unsigned int pthread_mutexattr_t;
+    
+    inline int pthread_mutex_lock(pthread_mutex_t *m) {
+        EnterCriticalSection(m);
+        return 0;
+    }
+
+    inline int pthread_mutex_unlock(pthread_mutex_t *m) {
+        LeaveCriticalSection(m);
+        return 0;
+    }
+        
+    inline int pthread_mutex_trylock(pthread_mutex_t *m) {
+        return TryEnterCriticalSection(m) ? 0 : EBUSY; 
+    }
+
+    inline int pthread_mutex_init(pthread_mutex_t *m, pthread_mutexattr_t *a) {
+        geo_argused(a);
+        InitializeCriticalSection(m);
+        return 0;
+    }
+
+    inline int pthread_mutex_destroy(pthread_mutex_t *m) {
+        DeleteCriticalSection(m);
+        return 0;
+    }
+
+    // Emulation of pthread condition variables using Windows API
+
+    typedef CONDITION_VARIABLE pthread_cond_t;
+    typedef unsigned int pthread_condattr_t;
+
+    inline int pthread_cond_init(pthread_cond_t *c, pthread_condattr_t *a) {
+        geo_argused(a);
+        InitializeConditionVariable(c);
+        return 0;
+    }
+
+    inline int pthread_cond_destroy(pthread_cond_t *c) {
+        geo_argused(c);
+        return 0;
+    }
+
+    inline int pthread_cond_broadcast(pthread_cond_t *c) {
+        WakeAllConditionVariable(c);
+        return 0;
+    }
+
+    inline int pthread_cond_wait(pthread_cond_t *c, pthread_mutex_t *m) {
+        SleepConditionVariableCS(c, m, INFINITE);
+        return 0;
+    }
+    
+#endif    
+    
 }
 
 #endif
@@ -4927,6 +5064,8 @@ namespace GEO {
             }
             return value;
         }
+
+	std::string GEOGRAM_API wchar_to_UTF8(const wchar_t* in);
     }
 }
 

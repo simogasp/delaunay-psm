@@ -1493,6 +1493,45 @@ namespace GEO {
             return l1 > l2 && haystack.compare(l1 - l2, l1, needle) == 0;
         }
 
+	// Reference: https://stackoverflow.com/questions/148403/
+	//     utf8-to-from-wide-char-conversion-in-stl
+	
+	std::string wchar_to_UTF8(const wchar_t* in) {
+	    std::string out;
+	    unsigned int codepoint = 0;
+	    for (; *in != 0;  ++in) {
+		if (*in >= 0xd800 && *in <= 0xdbff) {
+		    codepoint = (unsigned int)(
+			((*in - 0xd800) << 10) + 0x10000
+		    );
+		} else {
+		    if (*in >= 0xdc00 && *in <= 0xdfff) {
+			codepoint |= (unsigned int)(*in - 0xdc00);
+		    } else {
+			codepoint = (unsigned int)(*in);
+		    }
+		
+		    if (codepoint <= 0x7f) {
+			out.append(1, char(codepoint));
+		    } else if (codepoint <= 0x7ff) {
+			out.append(1, char(0xc0 | ((codepoint >> 6) & 0x1f)));
+			out.append(1, char(0x80 | (codepoint & 0x3f)));
+		    } else if (codepoint <= 0xffff) {
+			out.append(1, char(0xe0 | ((codepoint >> 12) & 0x0f)));
+			out.append(1, char(0x80 | ((codepoint >> 6) & 0x3f)));
+			out.append(1, char(0x80 | (codepoint & 0x3f)));
+		    } else {
+			out.append(1, char(0xf0 | ((codepoint >> 18) & 0x07)));
+			out.append(1, char(0x80 | ((codepoint >> 12) & 0x3f)));
+			out.append(1, char(0x80 | ((codepoint >> 6) & 0x3f)));
+			out.append(1, char(0x80 | (codepoint & 0x3f)));
+		    }
+		    codepoint = 0;
+		}
+	    }
+	    return out;
+	}
+	
         
 
         ConversionError::ConversionError(
@@ -1731,9 +1770,9 @@ namespace {
     class RootEnvironment : public Environment {
     protected:
         
-        virtual bool get_local_value(
+        bool get_local_value(
             const std::string& name, std::string& value
-        ) const {
+        ) const override {
             auto it = values_.find(name);
             if(it != values_.end()) {
                 value = it->second;
@@ -1743,15 +1782,15 @@ namespace {
         }
 
         
-        virtual bool set_local_value(
+        bool set_local_value(
             const std::string& name, const std::string& value
-        ) {
+        ) override {
             values_[name] = value;
             return true;
         }
 
         
-        virtual ~RootEnvironment() {
+        ~RootEnvironment() override {
         }
 
     private:
@@ -3656,8 +3695,10 @@ namespace {
 // "compatibility" as the default (except on Mac/OS that prefers "core")	
         declare_arg(
             "gfx:GL_profile",
-#ifdef GEO_OS_APPLE	    
+#if defined(GEO_OS_APPLE)
 	    "core",
+#elif defined(GEO_OS_ANDROID)
+	    "ES",	    
 #else
 	    "compatibility",	    
 #endif	    
@@ -4297,7 +4338,8 @@ namespace GEO {
     }
 
     std::ostream& Logger::div(const std::string& title) {
-	std::ostream& result = is_initialized() ?
+	std::ostream& result = 
+   	    (is_initialized() && !Process::is_running_threads()) ?
             instance()->div_stream(title) :
             (std::cerr << "=====" << title << std::endl);
 	return result;
@@ -5152,6 +5194,11 @@ namespace GEO {
             }
 #elif defined GEO_OS_EMSCRIPTEN
             home="/";
+#elif defined GEO_OS_ANDROID
+            char* result = getenv("EXTERNAL_STORAGE");
+            if(result != nullptr) {
+                home=result;
+            }
 #else            
             char* result = getenv("HOME");
             if(result != nullptr) {
@@ -5419,19 +5466,19 @@ namespace {
     class TerminalProgressClient : public ProgressClient {
     public:
         
-        virtual void begin() {
+	void begin() override {
             const ProgressTask* task = Progress::current_task();
             CmdLine::ui_progress(task->task_name(), 0, 0);
         }
 
         
-        virtual void progress(index_t step, index_t percent) {
+	void progress(index_t step, index_t percent) override {
             const ProgressTask* task = Progress::current_task();
             CmdLine::ui_progress(task->task_name(), step, percent);
         }
 
         
-        virtual void end(bool canceled) {
+	void end(bool canceled) override {
             const ProgressTask* task = Progress::current_task();
             double elapsed = SystemStopwatch::now() - task->start_time();
             if(canceled) {
@@ -5445,7 +5492,7 @@ namespace {
 
     protected:
         
-        virtual ~TerminalProgressClient() {
+	~TerminalProgressClient() override {
         }
     };
 }
@@ -5550,6 +5597,7 @@ namespace GEO {
 
     void ProgressTask::next() {
         step_++;
+	step_ = std::min(step_, max_steps_);
         update();
     }
 
@@ -6033,15 +6081,7 @@ namespace GEO {
             }
             fpe_initialized_ = true;
             fpe_enabled_ = flag;
-
-            if(os_enable_FPE(flag)) {
-                Logger::out("Process")
-                    << (flag ? "FPE enabled" : "FPE disabled")
-                    << std::endl;
-            } else {
-                Logger::warn("Process")
-                    << "FPE control not implemented" << std::endl;
-            }
+	    os_enable_FPE(flag);
         }
 
         bool cancel_enabled() {
@@ -6149,7 +6189,7 @@ namespace {
             // under Android, so I'm using assembly functions
             // from atomics (I'm sure they got the right memory
             // barriers for SMP).
-#ifdef GEO_OS_ANDROID
+#if defined(GEO_OS_ANDROID) || defined(GEO_OS_RASPBERRY)
             mutex_ = 0;
 #else
             pthread_mutex_init(&mutex_, nullptr);
@@ -6159,23 +6199,27 @@ namespace {
         }
 
         
-        virtual index_t maximum_concurrent_threads() {
+        index_t maximum_concurrent_threads() override {
             return Process::number_of_cores();
         }
 
         
-        virtual void enter_critical_section() {
-#ifdef GEO_OS_ANDROID
-            lock_mutex_arm(&mutex_);
+	void enter_critical_section() override {
+#if defined(GEO_OS_ANDROID)
+            lock_mutex_android(&mutex_);
+#elif defined(GEO_OS_ANDROID)
+            lock_mutex_arm32(&mutex_);
 #else
             pthread_mutex_lock(&mutex_);
 #endif
         }
 
         
-        virtual void leave_critical_section() {
-#ifdef GEO_OS_ANDROID
-            unlock_mutex_arm(&mutex_);
+	void leave_critical_section() override {
+#if defined(GEO_OS_RASPBERRY)
+            unlock_mutex_arm32(&mutex_);	    
+#elif defined(GEO_OS_ANDROID)
+            unlock_mutex_android(&mutex_);
 #else
             pthread_mutex_unlock(&mutex_);
 #endif
@@ -6183,7 +6227,7 @@ namespace {
 
     protected:
         
-        virtual ~PThreadManager() {
+	~PThreadManager() override {
             pthread_attr_destroy(&attr_);
 #ifndef GEO_OS_ANDROID
             pthread_mutex_destroy(&mutex_);
@@ -6200,9 +6244,9 @@ namespace {
         }
 
         
-        virtual void run_concurrent_threads(
+	void run_concurrent_threads (
             ThreadGroup& threads, index_t max_threads
-        ) {
+        ) override {
             // TODO: take max_threads into account
             geo_argused(max_threads);
 
@@ -6221,8 +6265,10 @@ namespace {
         }
 
     private:
-#ifdef GEO_OS_ANDROID
-        arm_mutex_t mutex_;
+#if defined(GEO_OS_RASPBERRY)
+        arm32_mutex_t mutex_;	
+#elif defined(GEO_OS_ANDROID)
+        android_mutex_t mutex_;
 #else
         pthread_mutex_t mutex_;
 #endif
@@ -6557,32 +6603,32 @@ namespace {
         }
 
         
-        virtual index_t maximum_concurrent_threads() {
+	index_t maximum_concurrent_threads() override {
             SYSTEM_INFO sysinfo;
             GetSystemInfo(&sysinfo);
             return sysinfo.dwNumberOfProcessors;
         }
 
         
-        virtual void enter_critical_section() {
+	void enter_critical_section() override {
             EnterCriticalSection(&lock_);
         }
 
         
-        virtual void leave_critical_section() {
+	void leave_critical_section() override {
             LeaveCriticalSection(&lock_);
         }
 
     protected:
         
-        virtual ~WindowsThreadManager() {
+	~WindowsThreadManager() override {
             DeleteCriticalSection(&lock_);
         }
 
         
-        virtual void run_concurrent_threads(
+	void run_concurrent_threads(
             ThreadGroup& threads, index_t max_threads
-        ) {
+        ) override {
             // TODO: take max_threads into account
             geo_argused(max_threads);
 
@@ -6638,7 +6684,7 @@ namespace {
 
     protected:
         
-        virtual ~WindowsThreadPoolManager() {
+	~WindowsThreadPoolManager() override {
 // It makes it crash on exit when calling these functions
 // with dynamic libs, I do not know why...            
 // TODO: investigate...
@@ -6649,9 +6695,9 @@ namespace {
         }
 
         
-        virtual void run_concurrent_threads(
+	void run_concurrent_threads(
             ThreadGroup& threads, index_t max_threads
-        ) {
+        ) override {
             // TODO: take max_threads into account
             geo_argused(max_threads);
 
@@ -17762,7 +17808,6 @@ namespace {
 	return m[0]+m[1];
     }
 
-
     inline int in_sphere_3d_filter_avx2(
         const double* p, const double* q, 
         const double* r, const double* s, const double* t
@@ -17800,7 +17845,7 @@ namespace {
 	__m128d max_max = _mm_max_pd(maxX, _mm_max_pd(maxY, maxZ));
 
 	// Computing dynamic filter
-	__m128d eps     = _mm_set_pd1(1.2466136531027298e-13);
+	__m128d eps     = _mm_set1_pd(1.2466136531027298e-13);
 	        eps     = _mm_mul_pd(eps, _mm_mul_pd(maxX, _mm_mul_pd(maxY, maxZ)));
 		eps     = _mm_mul_pd(eps, _mm_mul_pd(max_max, max_max));
 	
@@ -20054,6 +20099,13 @@ namespace GEO {
 
 #include <string.h>
 
+// Uncomment to display histogram of
+// number of collisions per set() and
+// get() operations.
+// There is probably room for improvement
+// in my hash function, but for large
+// pointsets, more then 99% of queries are
+// in the first slot (seems to be good enough).
 //#define CAVITY_WITH_STATS
 #ifdef CAVITY_WITH_STATS
 #define CAVITY_STATS(x) x
@@ -23629,72 +23681,6 @@ namespace GEO {
 #pragma GCC diagnostic ignored "-Wweak-vtables"
 #endif
 
-
-#ifdef GEO_OS_WINDOWS
-
-namespace {
-    using namespace GEO;
-    
-    // Emulation of pthread mutexes using Windows API
-
-    typedef CRITICAL_SECTION pthread_mutex_t;
-    typedef unsigned int pthread_mutexattr_t;
-    
-    inline int pthread_mutex_lock(pthread_mutex_t *m) {
-        EnterCriticalSection(m);
-        return 0;
-    }
-
-    inline int pthread_mutex_unlock(pthread_mutex_t *m) {
-        LeaveCriticalSection(m);
-        return 0;
-    }
-        
-    inline int pthread_mutex_trylock(pthread_mutex_t *m) {
-        return TryEnterCriticalSection(m) ? 0 : EBUSY; 
-    }
-
-    inline int pthread_mutex_init(pthread_mutex_t *m, pthread_mutexattr_t *a) {
-        geo_argused(a);
-        InitializeCriticalSection(m);
-        return 0;
-    }
-
-    inline int pthread_mutex_destroy(pthread_mutex_t *m) {
-        DeleteCriticalSection(m);
-        return 0;
-    }
-
-    // Emulation of pthread condition variables using Windows API
-
-    typedef CONDITION_VARIABLE pthread_cond_t;
-    typedef unsigned int pthread_condattr_t;
-
-    inline int pthread_cond_init(pthread_cond_t *c, pthread_condattr_t *a) {
-        geo_argused(a);
-        InitializeConditionVariable(c);
-        return 0;
-    }
-
-    inline int pthread_cond_destroy(pthread_cond_t *c) {
-        geo_argused(c);
-        return 0;
-    }
-
-    inline int pthread_cond_broadcast(pthread_cond_t *c) {
-        WakeAllConditionVariable(c);
-        return 0;
-    }
-
-    inline int pthread_cond_wait(pthread_cond_t *c, pthread_mutex_t *m) {
-        SleepConditionVariableCS(c, m, INFINITE);
-        return 0;
-    }
-}
-
-
-#endif
-
 namespace {
     using namespace GEO;
 
@@ -23849,7 +23835,7 @@ namespace GEO {
             pthread_mutex_init(&mutex_, nullptr);
         }
 
-        ~Delaunay3dThread() {
+        ~Delaunay3dThread() override {
             pthread_mutex_destroy(&mutex_);
             pthread_cond_destroy(&cond_);
         }
@@ -23897,7 +23883,7 @@ namespace GEO {
             );
         }
 
-        virtual void run() {
+	void run() override {
             
             finished_ = false;
 
