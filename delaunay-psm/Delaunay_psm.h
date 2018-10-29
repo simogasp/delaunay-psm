@@ -271,7 +271,10 @@ namespace GEO {
 #error "Unsupported operating system"
 #endif
 
-#if defined(GEO_COMPILER_GCC) || defined(GEO_COMPILER_CLANG) || defined(GEO_COMPILER_MINGW)
+#if defined(GEO_COMPILER_GCC)   || \
+    defined(GEO_COMPILER_CLANG) || \
+    defined(GEO_COMPILER_MINGW) || \
+    defined(GEO_COMPILER_EMSCRIPTEN)
 #define GEO_COMPILER_GCC_FAMILY
 #endif
 
@@ -291,10 +294,8 @@ namespace GEO {
 
 #if defined(GOMGEN)
 #define GEO_NORETURN
-#elif defined(GEO_COMPILER_CLANG) || \
-    defined(GEO_COMPILER_GCC)   || \
-    defined(GEO_COMPILER_EMSCRIPTEN) || \
-    defined(GEO_COMPILER_INTEL)
+#elif defined(GEO_COMPILER_GCC_FAMILY) || \
+      defined(GEO_COMPILER_INTEL) 
 #define GEO_NORETURN __attribute__((noreturn))
 #else
 #define GEO_NORETURN
@@ -1845,6 +1846,11 @@ inline char atomic_bittestandreset_x86(volatile unsigned int* ptr, unsigned int 
 #pragma intrinsic(_WriteBarrier)
 #pragma intrinsic(_ReadWriteBarrier)
 
+#  ifdef GEO_COMPILER_MINGW
+inline void geo_pause() {
+}
+#  endif
+
 #endif // GEO_OS_WINDOWS
 
 #endif
@@ -1906,7 +1912,7 @@ namespace GEO {
             unlock_mutex_android(&x);
         }
 
-#elif defined(GEO_OS_LINUX) 
+#elif defined(GEO_OS_LINUX) || defined(GEO_COMPILER_MINGW)
 
         
         typedef unsigned char spinlock;
@@ -1959,7 +1965,7 @@ namespace GEO {
         }
 #endif // __MAC_10_12
 
-#elif defined(GEO_OS_WINDOWS)
+#elif defined(GEO_OS_WINDOWS) && !defined(GEO_COMPILER_MINGW)
 
         
         typedef short spinlock;
@@ -2242,7 +2248,7 @@ namespace GEO {
                 geo_thread_sync_assert(i < size());
                 index_t w = i >> 5;
                 index_t b = i & 31;
-                while(_interlockedbittestandset(&spinlocks_[w], b)) {
+                while(_interlockedbittestandset((long *)(&spinlocks_[w]), long(b))) {
                     // Intel recommends to have a PAUSE asm instruction
                     // in the spinlock loop. Under MSVC/Windows,
                     // YieldProcessor() is a macro that calls the
@@ -2264,7 +2270,7 @@ namespace GEO {
                 // Note2: We do not need here _WriteBarrier() since
                 // _interlockedbittestandreset
                 // "acts as a full barrier in VC2005" according to the doc
-                _interlockedbittestandreset(&spinlocks_[w], b);
+                _interlockedbittestandreset((long*)(&spinlocks_[w]), long(b));
             }
 
         private:
@@ -2589,18 +2595,20 @@ namespace GEO {
 
 namespace GEO {
 
-
-#if defined(GEO_COMPILER_GCC_FAMILY) 
-#define GEO_THREAD_LOCAL __thread
-#elif defined(GEO_COMPILER_MSVC) || defined(GEO_COMPILER_INTEL)
-#define GEO_THREAD_LOCAL __declspec(thread)
-#elif defined(GEO_COMPILER_EMSCRIPTEN)
-#define GEO_THREAD_LOCAL __thread    
-#else
-#error "Unknown compiler"
+// thread_local is supposed to be supported by c++0x,
+// but some old MSVC compilers do not have it.    
+#if defined(GEO_COMPILER_MSVC) && !defined(thread_local)
+#  define thread_local __declspec(thread)
 #endif
 
-
+// Older MAC OS X do not have thread_local
+#ifdef GEO_OS_APPLE
+# if MAC_OS_X_VERSION_MIN_REQUIRED <= MAC_OS_X_VERSION_10_9
+#  define thread_local
+#  define GEO_NO_THREAD_LOCAL    
+# endif
+#endif
+   
     class GEOGRAM_API Thread : public Counted {
     public:
 
@@ -2748,114 +2756,40 @@ namespace GEO {
         std::string GEOGRAM_API executable_filename();
     }
 
-    template <class Func>
-    class ParallelForThread : public Thread {
-    public:
-        ParallelForThread(
-            const Func& func, index_t from, index_t to, index_t step = 1
-        ) :
-            func_(func),
-            from_(from),
-            to_(to),
-            step_(step) {
-        }
-
-        virtual void run() {
-            for(index_t i = from_; i < to_; i += step_) {
-                const_cast<Func&> (func_)(i);
-            }
-        }
-
-    protected:
-        
-        virtual ~ParallelForThread() {
-        }
-
-    private:
-        const Func& func_;
-        index_t from_;
-        index_t to_;
-        index_t step_;
-    };
-
-    template <class Func>
-    inline void parallel_for(
-        const Func& func, index_t from, index_t to,
+     void GEOGRAM_API parallel_for(
+        index_t from, index_t to, std::function<void(index_t)> func,
         index_t threads_per_core = 1,
         bool interleaved = false
-    ) {
-#ifdef GEO_OS_WINDOWS
-        // TODO: This is a limitation of WindowsThreadManager, to be fixed.
-        threads_per_core = 1;
-#endif
+    );
 
-        index_t nb_threads = std::min(
-            to - from,
-            Process::maximum_concurrent_threads() * threads_per_core
-        );
+     void GEOGRAM_API parallel_for_slice(
+	 index_t from, index_t to, std::function<void(index_t, index_t)> func,
+	 index_t threads_per_core = 1
+     );
 
-	nb_threads = std::max(index_t(1), nb_threads);
-	
-        index_t batch_size = (to - from) / nb_threads;
-        if(Process::is_running_threads() || nb_threads == 1) {
-            for(index_t i = from; i < to; i++) {
-                const_cast<Func&> (func)(i);
-            }
-        } else {
-            ThreadGroup threads;
-            if(interleaved) {
-                for(index_t i = 0; i < nb_threads; i++) {
-                    threads.push_back(
-                        new ParallelForThread<Func>(
-                            func, from + i, to, nb_threads
-                        )
-                    );
-                }
-            } else {
-                index_t cur = from;
-                for(index_t i = 0; i < nb_threads; i++) {
-                    if(i == nb_threads - 1) {
-                        threads.push_back(
-                            new ParallelForThread<Func>(
-                                func, cur, to
-                            )
-                        );
-                    } else {
-                        threads.push_back(
-                            new ParallelForThread<Func>(
-                                func, cur, cur + batch_size
-                            )
-                        );
-                    }
-                    cur += batch_size;
-                }
-            }
-            Process::run_threads(threads);
-        }
-    }
+     void GEOGRAM_API parallel(
+	 std::function<void()> f1,
+	 std::function<void()> f2	 
+     );
 
-    template <class T> class ParallelForMemberCallback {
-    public:
-        typedef void (T::*fptr)(index_t);
+     void GEOGRAM_API parallel(
+	 std::function<void()> f1,
+	 std::function<void()> f2,
+	 std::function<void()> f3,
+	 std::function<void()> f4	 
+     );
 
-        ParallelForMemberCallback(T* object, fptr f) :
-            object_(object), f_(f) {
-        }
-
-        void operator()(index_t i) {
-            (*object_.*f_)(i);
-        }
-    private:
-        T* object_;
-        fptr f_;
-    };
-    
-
-    template <class T> ParallelForMemberCallback<T>
-    parallel_for_member_callback(T* obj, void (T::* fun)(index_t)) {
-        return ParallelForMemberCallback<T>(obj, fun);
-    }
-    
+     void GEOGRAM_API parallel(
+	 std::function<void()> f1,
+	 std::function<void()> f2,
+	 std::function<void()> f3,
+	 std::function<void()> f4,
+	 std::function<void()> f5,
+	 std::function<void()> f6,
+	 std::function<void()> f7,
+	 std::function<void()> f8	 
+     );
+     
 }
 
 #endif
@@ -4614,6 +4548,92 @@ namespace GEO {
             target.xyz_max[c] = std::max(B1.xyz_max[c], B2.xyz_max[c]);
         }
     }
+
+   
+
+    template <class FT> vecng<3,FT> transform_vector(
+        const vecng<3,FT>& v,
+        const Matrix<4,FT>& m
+    ){
+        index_t i,j ;
+        FT result[4] ;
+
+        for(i=0; i<4; i++) {
+            result[i] = 0 ;
+        }
+        for(i=0; i<4; i++) {
+            for(j=0; j<3; j++) {
+                result[i] += v[j] * m(j,i) ;
+            }
+        }
+        
+        return vecng<3,FT>(
+            result[0], result[1], result[2]
+        ) ; 
+    }
+
+    template <class FT> vecng<3,FT> transform_point(
+        const vecng<3,FT>& v,
+        const Matrix<4,FT>& m
+    ){
+        index_t i,j ;
+        FT result[4] ;
+        
+        for(i=0; i<4; i++) {
+            result[i] = 0 ;
+        }
+        for(i=0; i<4; i++) {
+            for(j=0; j<3; j++) {
+                result[i] += v[j] * m(j,i) ;
+            }
+            result[i] += m(3,i);
+        }
+    
+        return vecng<3,FT>(
+            result[0] / result[3],
+            result[1] / result[3],
+            result[2] / result[3] 
+        ) ; 
+    }
+
+    template <class FT> vecng<4,FT> transform_vector(
+        const vecng<4,FT>& v,
+        const Matrix<4,FT>& m
+    ) {
+        index_t i,j ;
+        FT res[4] = {FT(0), FT(0), FT(0), FT(0)};
+        
+        for(i=0; i<4; i++) {
+            for(j=0; j<4; j++) {
+                res[i] += v[j] * m(j,i) ;
+            }
+        }
+    
+        return vecng<4,FT>(res[0], res[1], res[2], res[3]) ; 
+    }
+
+    
+    
+    inline mat4 create_translation_matrix(const vec3& T) {
+        mat4 result;
+        result.load_identity();
+        result(3,0) = T.x;
+        result(3,1) = T.y;
+        result(3,2) = T.z;
+        return result;
+    }
+    
+    inline mat4 create_scaling_matrix(double s) {
+        mat4 result;
+        result.load_identity();
+        result(0,0) = s;
+        result(1,1) = s;
+        result(2,2) = s;        
+        return result;
+    }
+    
+        
+    
 }
 
 #endif
@@ -4772,6 +4792,46 @@ namespace GEO {
 	    const double* p0, const double* p1, const double* p2
 	);
 
+	bool points_are_identical_2d(
+	    const double* p1,
+	    const double* p2
+	);
+    
+	bool GEOGRAM_API points_are_identical_3d(
+	    const double* p1,
+	    const double* p2
+	);
+
+	bool GEOGRAM_API points_are_colinear_3d(
+	    const double* p1,
+	    const double* p2,
+	    const double* p3
+        );
+
+	inline Sign orient_3d_inexact(
+	    const double* p0, const double* p1,
+	    const double* p2, const double* p3
+	) {
+	    double a11 = p1[0] - p0[0] ;
+	    double a12 = p1[1] - p0[1] ;
+	    double a13 = p1[2] - p0[2] ;
+	    
+	    double a21 = p2[0] - p0[0] ;
+	    double a22 = p2[1] - p0[1] ;
+	    double a23 = p2[2] - p0[2] ;
+	    
+	    double a31 = p3[0] - p0[0] ;
+	    double a32 = p3[1] - p0[1] ;
+	    double a33 = p3[2] - p0[2] ;
+	    
+	    double Delta = det3x3(
+		a11,a12,a13,
+		a21,a22,a23,
+		a31,a32,a33
+	    );
+
+	    return geo_sgn(Delta);
+	}
 	
         void GEOGRAM_API show_stats();
 
@@ -5523,6 +5583,578 @@ namespace GEO {
 #endif
 
 
+/******* extracted from ../voronoi/convex_cell.h *******/
+
+#ifndef GEOGRAM_VORONOI_CONVEX_CELL
+#define GEOGRAM_VORONOI_CONVEX_CELL
+
+#ifndef STANDALONE_CONVEX_CELL
+#endif
+
+#include <string>
+#include <vector>
+#include <iostream>
+#include <cmath>
+#include <cassert>
+
+
+
+
+
+namespace VBW {
+
+#ifdef STANDALONE_CONVEX_CELL
+    using std::vector;
+    typedef unsigned int index_t;
+    typedef unsigned int global_index_t;
+#   define vbw_assert(x) assert(x)
+    struct vec2 {
+	double x;
+	double y;
+    };
+    struct vec3 {
+	double x;
+	double y;
+	double z;
+    };
+    struct vec4 {
+	double x;
+	double y;
+	double z;
+	double w;
+    };
+#else    
+    using GEO::vector;
+    typedef unsigned int index_t;        // Always 32 bits
+    typedef GEO::index_t global_index_t; // Possibly 64 bits in GARGANTUA mode
+#   define vbw_assert(x) geo_debug_assert(x)
+    using GEO::vec2;
+    using GEO::vec3;
+    using GEO::vec4;
+#endif    
+    
+
+
+
+    inline vec2 make_vec2(
+	double x, double y
+    ) {
+	vec2 result;
+	result.x = x;
+	result.y = y;
+	return result;
+    }
+    
+
+    inline vec3 make_vec3(
+	double x, double y, double z
+    ) {
+	vec3 result;
+	result.x = x;
+	result.y = y;
+	result.z = z;
+	return result;
+    }
+
+
+    inline vec3 cross(vec3 v1, vec3 v2) {
+	return make_vec3(
+	    v1.y*v2.z - v1.z*v2.y,
+	    v1.z*v2.x - v1.x*v2.z,
+	    v1.x*v2.y - v1.y*v2.x
+	);
+    }
+
+    inline double dot(vec3 v1, vec3 v2) {
+	return (
+	    v1.x*v2.x + v1.y*v2.y + v1.z*v2.z
+	);
+    }
+
+    inline double squared_length(vec3 v) {
+	return (v.x*v.x + v.y*v.y + v.z*v.z);
+    }
+
+    inline double squared_distance(vec3 v, vec3 w) {
+	double dx = w.x-v.x;
+	double dy = w.y-v.y;
+	double dz = w.z-v.z;
+	return (dx*dx+dy*dy+dz*dz);
+    }
+
+    inline double length(vec3 v) {
+	return ::sqrt(squared_length(v));
+    }
+
+    inline vec3 normalize(vec3 v) {
+	double s = 1.0/length(v);
+	return make_vec3(
+	    s*v.x, s*v.y, s*v.z
+	);
+    }
+    
+    inline vec4 make_vec4(
+	double x, double y, double z, double w
+    ) {
+	vec4 result;
+	result.x = x;
+	result.y = y;
+	result.z = z;
+	result.w = w;
+	return result;
+    }
+
+    inline double dot(vec4 v1, vec4 v2) {
+	return (
+	    v1.x*v2.x + v1.y*v2.y +
+	    v1.z*v2.z + v1.w*v2.w
+	);
+    }
+
+    inline double squared_length(vec4 v) {
+	return (
+	    v.x*v.x + v.y*v.y +
+	    v.z*v.z + v.w*v.w
+	);
+    }
+
+    inline double length(vec4 v) {
+	return ::sqrt(squared_length(v));
+    }
+    
+    enum {
+	CONFLICT_MASK  = 32768, 
+	END_OF_LIST    = 32767, 
+	VERTEX_AT_INFINITY = 0  
+    };
+
+
+    typedef unsigned char uchar;
+    
+    typedef unsigned short ushort;
+
+    struct Triangle {
+	ushort i;
+	ushort j;
+	ushort k;
+    };
+
+    inline Triangle make_triangle(
+	ushort i, ushort j, ushort k
+    ) {
+	Triangle result;
+	result.i = i;
+	result.j = j;
+	result.k = k;
+	return result;
+    }
+
+    struct TriangleWithFlags : public Triangle {
+	ushort flags;
+    };
+
+    inline TriangleWithFlags make_triangle_with_flags(
+	ushort i, ushort j, ushort k, ushort f
+    ) {
+	TriangleWithFlags result;
+	result.i = i;
+	result.j = j;
+	result.k = k;
+	result.flags = f;
+	return result;
+    }
+
+
+
+
+    inline double det2x2(
+	double a11, double a12,
+	double a21, double a22
+    ) {
+	return a11*a22 - a12*a21;
+    }
+    
+    inline double det3x3(
+	double a11, double a12, double a13,
+	double a21, double a22, double a23,
+	double a31, double a32, double a33
+    ) {
+	return
+	    a11*det2x2(a22,a23,a32,a33)
+	    -a21*det2x2(a12,a13,a32,a33)
+	    +a31*det2x2(a12,a13,a22,a23);
+    }
+
+    inline double det4x4(
+	double a11, double a12, double a13, double a14,
+	double a21, double a22, double a23, double a24,               
+	double a31, double a32, double a33, double a34,  
+	double a41, double a42, double a43, double a44  
+    ) {
+	double m12 = a21*a12 - a11*a22;
+	double m13 = a31*a12 - a11*a32;
+	double m14 = a41*a12 - a11*a42;
+	double m23 = a31*a22 - a21*a32;
+	double m24 = a41*a22 - a21*a42;
+	double m34 = a41*a32 - a31*a42;
+	
+	double m123 = m23*a13 - m13*a23 + m12*a33;
+	double m124 = m24*a13 - m14*a23 + m12*a43;
+	double m134 = m34*a13 - m14*a33 + m13*a43;
+	double m234 = m34*a23 - m24*a33 + m23*a43;
+	
+	return (m234*a14 - m134*a24 + m124*a34 - m123*a44);
+    }   
+
+
+
+    enum ConvexCellFlag {
+	None        = 0,
+	WithVGlobal = 1,
+	WithTFlags  = 2
+    };
+
+    typedef index_t ConvexCellFlags;
+    
+    class GEOGRAM_API ConvexCell {
+      public:
+
+	ConvexCell(ConvexCellFlags flags = None);
+
+	void clear();
+	
+	void init_with_box(
+	    double xmin, double ymin, double zmin,
+	    double xmax, double ymax, double zmax
+	);
+	
+	void save(const std::string& filename, double shrink=0.0) const;
+
+
+	index_t save(
+	    std::ostream& out, index_t v_offset=1, double shrink=0.0
+	) const;
+	
+	void clip_by_plane(vec4 P);
+
+	void clip_by_plane(vec4 P, global_index_t j);
+	
+	index_t nb_t() const {
+	    return nb_t_;
+	}
+
+	index_t nb_v() const {
+	    return nb_v_;
+	}
+
+	index_t create_vertex(vec4 P) {
+	    if(nb_v_ == max_v_) {
+		grow_v();
+	    }
+	    plane_eqn_[nb_v_] = P;
+	    index_t result = nb_v_;
+	    ++nb_v_;
+	    return result;
+	}
+
+	index_t create_triangle(index_t i, index_t j, index_t k) {
+	    vbw_assert(i < nb_v());
+	    vbw_assert(j < nb_v());
+	    vbw_assert(k < nb_v());
+	    return new_triangle(i,j,k);
+	}
+
+	void kill_vertex(index_t v);
+
+	bool vertex_is_contributing(index_t v) const {
+	    geo_assert(!geometry_dirty_);
+	    return v2t_[v] != END_OF_LIST;
+	}
+
+	void compute_geometry();
+
+	double facet_area(index_t v) const;
+
+	double volume() const;
+
+	vec3 barycenter() const;
+
+	double squared_radius(vec3 center) const;
+
+	bool empty() const {
+	    return first_valid_ == END_OF_LIST;
+	}
+
+	global_index_t v_global_index(index_t lv) const {
+	    vbw_assert(has_vglobal_);
+	    vbw_assert(lv < nb_v());
+	    return vglobal_[lv];
+	}
+
+	bool has_v_global_index(global_index_t v) const;
+
+	ushort first_triangle() const {
+	    return ushort(first_valid_);
+	}
+
+	ushort next_triangle(ushort t) const {
+	    return get_triangle_flags(t);
+	}
+
+	vec3 triangle_point(ushort t) const {
+	    if(geometry_dirty_) {
+		TriangleWithFlags T = get_triangle_and_flags(t);
+		vec4 result = compute_triangle_point(T);
+		vbw_assert(result.w != 0.0);
+		return make_vec3(
+		    result.x/result.w, result.y/result.w, result.z/result.w
+		);
+	    }
+	    return triangle_point_[t];
+	}
+
+	global_index_t triangle_v_global_index(ushort t, index_t llv) const {
+	    Triangle T = get_triangle(t);
+	    ushort lv = ushort((llv==0)*T.i + (llv==1)*T.j + (llv==2)*T.k);
+	    return v_global_index(lv);
+	}
+
+	index_t triangle_v_local_index(ushort t, index_t llv) const {
+	    Triangle T = get_triangle(t);
+	    return index_t((llv==0)*T.i + (llv==1)*T.j + (llv==2)*T.k);
+	}
+	
+	bool triangle_is_user_marked(ushort t) {
+	    vbw_assert(has_tflags_);
+	    vbw_assert(t < max_t_);
+	    return (tflags_[t] != 0);
+	}
+
+	void triangle_user_mark(ushort t) {
+	    vbw_assert(has_tflags_);
+	    vbw_assert(t < max_t_);
+	    tflags_[t] = 1;
+	}
+
+	void triangle_user_unmark(ushort t) {
+	    vbw_assert(has_tflags_);
+	    vbw_assert(t < max_t_);
+	    tflags_[t] = 0;
+	}
+
+	bool cell_has_conflict(const vec4& P) {
+	    for(
+		ushort t = first_triangle();
+		t!=END_OF_LIST; t=next_triangle(t)
+	    ) {
+		TriangleWithFlags T = get_triangle_and_flags(t);
+		if(triangle_is_in_conflict(T,P)) {
+		    return true;
+		}
+	    }
+	    return false;
+	}
+
+	bool cell_is_totally_in_conflict(const vec4& P) {
+	    for(
+		ushort t = first_triangle();
+		t!=END_OF_LIST; t=next_triangle(t)
+	    ) {
+		TriangleWithFlags T = get_triangle_and_flags(t);
+		if(!triangle_is_in_conflict(T,P)) {
+		    return false;
+		}
+	    }
+	    return true;
+	}
+
+
+	
+	 index_t triangle_adjacent(index_t t, index_t le) const {
+	     vbw_assert(t < max_t());
+	     vbw_assert(le < 3);
+	     Triangle T = get_triangle(t);
+	     index_t v1 = index_t((le == 0)*T.j + (le == 1)*T.k + (le == 2)*T.i);
+	     index_t v2 = index_t((le == 0)*T.k + (le == 1)*T.i + (le == 2)*T.j);
+	     vbw_assert(vv2t(v1,v2) == t);
+	     vbw_assert(vv2t(v2,v1) != END_OF_LIST);
+	     return vv2t(v2,v1);
+	 }
+
+	index_t triangle_find_vertex(index_t t, index_t v) const {
+	    vbw_assert(t < max_t());
+	    Triangle T = get_triangle(t);
+	    index_t result = index_t((T.j == v) + 2*(T.k == v));
+	    return result;
+	}
+
+	bool triangle_is_infinite(index_t t) const {
+	    vbw_assert(t < max_t());
+	    Triangle T = get_triangle(t);
+	    return (
+		T.i == VERTEX_AT_INFINITY ||
+		T.j == VERTEX_AT_INFINITY ||
+		T.k == VERTEX_AT_INFINITY
+	    );
+	}
+	
+        vec4 vertex_plane(index_t v) const {
+	    vbw_assert(v < max_v());
+	    return plane_eqn_[v];
+	}
+
+	vec3 vertex_plane_normal(index_t v) const {
+	    vbw_assert(v != VERTEX_AT_INFINITY);
+	    vbw_assert(v < max_v());
+	    return make_vec3(
+		plane_eqn_[v].x,
+		plane_eqn_[v].y,
+		plane_eqn_[v].z
+	    );
+	}
+	
+	bool triangle_is_marked_as_conflict(index_t t) const {
+	    vbw_assert(t < max_t());
+	    return (get_triangle_flags(t) & ushort(CONFLICT_MASK)) != 0;
+	}
+       
+        bool triangle_is_in_conflict(
+	    TriangleWithFlags T, const vec4& eqn
+	) const;
+
+	index_t new_triangle(index_t i, index_t j, index_t k) {
+	    index_t result = first_free_;
+	    if(result == END_OF_LIST) {
+		result = nb_t_;
+		++nb_t_;
+		if(nb_t_ > max_t()) {
+		    grow_t();
+		}
+	    } else {
+		first_free_ = index_t(
+		    get_triangle_flags(first_free_) & ~ushort(CONFLICT_MASK)
+		);
+	    }
+	    vbw_assert(result < max_t());
+	    t_[result] = make_triangle_with_flags(
+		ushort(i), ushort(j), ushort(k), ushort(first_valid_)
+	    );
+	    set_vv2t(i, j, result);
+	    set_vv2t(j, k, result);
+	    set_vv2t(k, i, result);	    
+	    first_valid_ = result;
+	    if(has_tflags_) {
+		tflags_[result] = 0;
+	    }
+	    return result;
+	}
+	
+	index_t new_triangle(
+	    index_t i, index_t j, index_t k,
+	    index_t adj0, index_t adj1, index_t adj2
+	) {
+	    // Silence warnings
+	    (void)(adj0);
+	    (void)(adj1);
+	    (void)(adj2);	    
+	    return new_triangle(i, j, k);
+	}
+
+	vec4 compute_triangle_point(TriangleWithFlags T) const;
+
+	Triangle get_triangle(index_t t) const {
+	    vbw_assert(t < max_t());
+	    return t_[t];
+	}
+	
+	ushort get_triangle_flags(index_t t) const {
+	    vbw_assert(t < max_t());
+	    return t_[t].flags;
+	}
+
+	void set_triangle_flags(index_t t, ushort flags) {
+	    vbw_assert(t < max_t());
+	    t_[t].flags = flags;
+	}
+
+	TriangleWithFlags get_triangle_and_flags(index_t t) const {
+	    vbw_assert(t < max_t());
+	    return t_[t];
+	}
+	
+	index_t vv2t(index_t v1, index_t v2) const {
+	    vbw_assert(v1 < max_v());
+	    vbw_assert(v2 < max_v());
+	    return index_t(vv2t_[max_v_*v1 + v2]);
+	}
+
+	void set_vv2t(index_t v1, index_t v2, index_t t) {
+	    vbw_assert(v1 < max_v());
+	    vbw_assert(v2 < max_v());
+	    vv2t_[max_v_*v1+v2] = ushort(t);
+	}
+
+	index_t max_t() const {
+	    return max_t_;
+	}
+
+	index_t max_v() const {
+	    return max_v_;
+	}
+
+	void grow_t();
+
+	void grow_v();
+
+      private:
+
+	
+	index_t max_t_;
+
+	
+	index_t max_v_;
+
+	
+	vector<TriangleWithFlags> t_;
+
+	vector<ushort> vv2t_;
+
+	vector<vec4> plane_eqn_;
+
+	
+	index_t nb_t_;
+
+		
+	index_t nb_v_;
+
+	
+	index_t first_free_;
+
+	
+	index_t first_valid_;
+
+	bool geometry_dirty_;
+
+	vector<vec3> triangle_point_;
+
+	vector<ushort> v2t_;
+
+	vector<global_index_t> vglobal_;
+	
+	bool has_vglobal_;
+
+	vector<uchar> tflags_;
+	
+	bool has_tflags_;
+    };
+}
+
+namespace GEO {
+    using VBW::ConvexCell;
+}
+
+#endif
+
 /******* extracted from delaunay.h *******/
 
 #ifndef GEOGRAM_DELAUNAY_DELAUNAY
@@ -5853,3 +6485,222 @@ namespace GEO {
 
 #endif
 
+
+/******* extracted from periodic.h *******/
+
+#ifndef GEOGRAM_DELAUNAY_PERIODIC
+#define GEOGRAM_DELAUNAY_PERIODIC
+
+
+
+namespace GEO {
+
+     class GEOGRAM_API Periodic {
+       public:
+
+	 index_t periodic_vertex_instance(index_t pv) const {
+	     geo_debug_assert(pv < nb_vertices_non_periodic_ * 27);
+	     return pv / nb_vertices_non_periodic_;
+	 }
+
+	 index_t periodic_vertex_real(index_t pv) const {
+	     geo_debug_assert(pv < nb_vertices_non_periodic_ * 27);	     
+	     return pv % nb_vertices_non_periodic_;
+	 }
+
+	 signed_index_t periodic_vertex_real(signed_index_t pv) const {
+	     geo_debug_assert(pv < signed_index_t(nb_vertices_non_periodic_ * 27));
+	     geo_debug_assert(pv != -1);
+	     return pv % signed_index_t(nb_vertices_non_periodic_);	     
+	 }
+	 
+	 index_t make_periodic_vertex(index_t real, index_t instance) const {
+	     geo_debug_assert(real < nb_vertices_non_periodic_);
+	     geo_debug_assert(instance < 27);
+	     return real + nb_vertices_non_periodic_*instance;
+	 }
+
+	 static index_t T_to_instance(int Tx, int Ty, int Tz) {
+	     geo_debug_assert(Tx >= -1 && Tx <= 1);
+	     geo_debug_assert(Ty >= -1 && Ty <= 1);
+	     geo_debug_assert(Tz >= -1 && Tz <= 1);	     
+	     int i = (Tz+1) + 3*(Ty+1) + 9*(Tx+1);
+	     geo_debug_assert(i >= 0 && i < 27);
+	     return index_t(reorder_instances[i]);
+	 }
+
+	 void periodic_vertex_get_T(index_t pv, int& Tx, int& Ty, int& Tz) const {
+	     geo_debug_assert(pv < nb_vertices_non_periodic_ * 27);	     	     
+	     index_t instance = periodic_vertex_instance(pv);
+	     Tx = translation[instance][0];
+	     Ty = translation[instance][1];
+	     Tz = translation[instance][2];
+	 }
+
+	 void periodic_vertex_set_T(index_t& pv, int Tx, int Ty, int Tz) const {
+	     geo_debug_assert(pv < nb_vertices_non_periodic_ * 27);
+	     geo_debug_assert(Tx >= -1 && Tx <= 1);
+	     geo_debug_assert(Ty >= -1 && Ty <= 1);
+	     geo_debug_assert(Tz >= -1 && Tz <= 1);	     
+	     pv = make_periodic_vertex(
+		 periodic_vertex_real(pv), T_to_instance(Tx, Ty, Tz)
+	     );
+	 }
+
+	 std::string periodic_vertex_to_string(index_t v) const {
+	     return
+		 String::to_string(periodic_vertex_real(v)) + ":" +
+		 String::to_string(periodic_vertex_instance(v)) ;
+	 }
+
+	 std::string binary_to_string(index_t m) const {
+	     std::string s(32,' ');
+	     for(index_t i=0; i<32; ++i) {
+		 s[i] = ((m & (1u << (31u-i))) != 0) ? '1' : '0'; 
+	     }
+	     return s;
+	 }
+	 
+	 static int translation[27][3];
+
+	 static int reorder_instances[27];
+
+	 static bool instance_is_positive[27];
+
+	 index_t nb_vertices_non_periodic_;
+     };
+    
+}
+
+#endif
+
+
+/******* extracted from periodic_delaunay_3d.h *******/
+
+#ifndef PERIODIC_DELAUNAY_TRIANGULATION_3D
+#define PERIODIC_DELAUNAY_TRIANGULATION_3D
+
+
+namespace GEO {
+
+    typedef Numeric::uint8 thread_index_t;
+    class PeriodicDelaunay3dThread;
+    
+     
+    class GEOGRAM_API PeriodicDelaunay3d : public Delaunay, public Periodic {
+    public:
+        PeriodicDelaunay3d(bool periodic, double period=1.0);
+
+        virtual void set_vertices(
+            index_t nb_vertices, const double* vertices
+        );
+
+	void set_weights(const double* weights);
+
+	void compute();
+	
+	vec3 vertex(index_t v) const;
+
+	double weight(index_t v) const;
+
+        virtual index_t nearest_vertex(const double* p) const;
+
+        virtual void set_BRIO_levels(const vector<index_t>& levels);
+
+	void get_incident_tets(index_t v, vector<index_t>& neighbors) const;
+
+	void copy_Laguerre_cell_from_Delaunay(
+	    GEO::index_t i,
+	    ConvexCell& C,
+	    GEO::vector<GEO::index_t>& neighbors
+	) const;         
+
+	bool has_empty_cells() const {
+	    return has_empty_cells_;
+	}
+
+	void save_cells(const std::string& basename, bool clipped);
+
+   protected:
+
+	GEO::index_t copy_Laguerre_cell_facet_from_Delaunay(
+	    GEO::index_t i,
+	    const GEO::vec3& Pi,
+	    double wi,
+	    double Pi_len2,
+	    GEO::index_t t,
+	    ConvexCell& C,
+	    GEO::vector<GEO::index_t>& neighbors
+	) const;
+	 
+	 
+	index_t compress(bool shrink=true);
+	
+	virtual void update_v_to_cell();
+
+	virtual void update_cicl();
+
+	void handle_periodic_boundaries();
+
+	index_t get_periodic_vertex_instances_to_create(
+	    index_t v,
+	    ConvexCell& C,
+	    vector<index_t>& neighbors,
+	    bool use_instance[27],
+	    bool& cell_is_on_boundary,
+	    bool& cell_is_outside_cube
+	 );
+	
+
+	void insert_vertices(index_t b, index_t e);
+
+	void check_volume();
+
+	PeriodicDelaunay3dThread* thread(index_t t) {
+	    geo_debug_assert(t < threads_.size());
+	    return reinterpret_cast<PeriodicDelaunay3dThread*>(
+		threads_[t].get()
+	    );
+	}
+
+	index_t nb_threads() const {
+	    return index_t(threads_.size());
+	}
+	
+    private:
+        friend class PeriodicDelaunay3dThread;
+	
+	bool periodic_;
+	double period_;
+	
+	const double* weights_;
+        vector<signed_index_t> cell_to_v_store_;
+        vector<signed_index_t> cell_to_cell_store_;
+        vector<index_t> cell_next_;
+        vector<thread_index_t> cell_thread_;
+        ThreadGroup threads_;
+        vector<index_t> reorder_;
+        vector<index_t> levels_;
+
+         bool debug_mode_;
+
+         bool verbose_debug_mode_;
+
+        bool benchmark_mode_;
+        
+
+	vector<index_t> vertex_instances_;
+
+	bool update_periodic_v_to_cell_;
+	vector<index_t> periodic_v_to_cell_rowptr_;
+	vector<index_t> periodic_v_to_cell_data_;
+	
+	bool has_empty_cells_;
+
+	index_t nb_reallocations_;
+    };
+    
+
+}
+
+#endif
