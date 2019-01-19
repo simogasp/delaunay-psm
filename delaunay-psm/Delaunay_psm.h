@@ -4784,6 +4784,11 @@ namespace GEO {
 	    const double* p0, const double* p1, const double* p2
 	);
 
+	Sign GEOGRAM_API det_4d(
+	    const double* p0, const double* p1,
+	    const double* p2, const double* p3
+	);
+	
 	bool GEOGRAM_API aligned_3d(
 	    const double* p0, const double* p1, const double* p2
 	);
@@ -5589,6 +5594,9 @@ namespace GEO {
 #define GEOGRAM_VORONOI_CONVEX_CELL
 
 #ifndef STANDALONE_CONVEX_CELL
+#  ifndef GEOGRAM_PSM
+#  include <geogram/basic/attributes.h>
+#  endif
 #endif
 
 #include <string>
@@ -5599,6 +5607,12 @@ namespace GEO {
 
 
 
+
+#ifndef STANDALONE_CONVEX_CELL
+namespace GEO {
+    class Mesh;
+}
+#endif
 
 
 namespace VBW {
@@ -5721,6 +5735,12 @@ namespace VBW {
     inline double length(vec4 v) {
 	return ::sqrt(squared_length(v));
     }
+
+    inline double squared_point_plane_distance(VBW::vec3 p, VBW::vec4 P) {
+	double result = P.x*p.x + P.y*p.y + P.z*p.z + P.w;
+	result = (result*result) / (P.x*P.x + P.y*P.y + P.z*P.z);
+	return result;
+    }
     
     enum {
 	CONFLICT_MASK  = 32768, 
@@ -5809,9 +5829,9 @@ namespace VBW {
 
 
     enum ConvexCellFlag {
-	None        = 0,
-	WithVGlobal = 1,
-	WithTFlags  = 2
+	None        = 0, 
+	WithVGlobal = 1,  
+	WithTFlags  = 2  
     };
 
     typedef index_t ConvexCellFlags;
@@ -5821,6 +5841,27 @@ namespace VBW {
 
 	ConvexCell(ConvexCellFlags flags = None);
 
+#ifndef STANDALONE_CONVEX_CELL
+	void use_exact_predicates(bool x) {
+	    use_exact_predicates_ = x;
+	}
+#endif
+	
+	bool has_vglobal() const {
+	    return has_vglobal_;
+	}
+
+	bool has_tflags() const {
+	    return has_tflags_;
+	}
+
+	void create_vglobal() {
+	    if(!has_vglobal()) {
+		has_vglobal_ = true;
+		vglobal_.assign(max_v(), global_index_t(-1));
+	    }
+	}
+	
 	void clear();
 	
 	void init_with_box(
@@ -5832,9 +5873,18 @@ namespace VBW {
 
 
 	index_t save(
-	    std::ostream& out, index_t v_offset=1, double shrink=0.0
+	    std::ostream& out, index_t v_offset=1, double shrink=0.0,
+	    bool borders_only=false
 	) const;
-	
+
+#if !defined(STANDALONE_CONVEX_CELL) && !defined(GEOGRAM_PSM)
+        void append_to_mesh(
+	    GEO::Mesh* mesh,
+	    double shrink=0.0, bool borders_only=false,
+	    GEO::Attribute<GEO::index_t>* facet_attr=nullptr
+	) const;
+#endif      
+      
 	void clip_by_plane(vec4 P);
 
 	void clip_by_plane(vec4 P, global_index_t j);
@@ -5857,6 +5907,12 @@ namespace VBW {
 	    return result;
 	}
 
+	index_t create_vertex(vec4 P, global_index_t v) {
+	    index_t result = create_vertex(P);
+	    vglobal_[nb_v()-1] = v;
+	    return result;
+	}
+	
 	index_t create_triangle(index_t i, index_t j, index_t k) {
 	    vbw_assert(i < nb_v());
 	    vbw_assert(j < nb_v());
@@ -5867,8 +5923,18 @@ namespace VBW {
 	void kill_vertex(index_t v);
 
 	bool vertex_is_contributing(index_t v) const {
-	    geo_assert(!geometry_dirty_);
-	    return v2t_[v] != END_OF_LIST;
+	    if(!geometry_dirty_) {
+		return v2t_[v] != END_OF_LIST;
+	    }
+	    index_t t = first_valid_;
+	    while(t != END_OF_LIST) { 
+		TriangleWithFlags T = get_triangle_and_flags(t);
+		if(T.i == v || T.j == v || T.k == v) {
+		    return true;
+		}
+		t = index_t(T.flags);
+	    }
+	    return false;
 	}
 
 	void compute_geometry();
@@ -5881,6 +5947,9 @@ namespace VBW {
 
 	double squared_radius(vec3 center) const;
 
+	double squared_inner_radius(vec3 center) const;
+
+	
 	bool empty() const {
 	    return first_valid_ == END_OF_LIST;
 	}
@@ -5891,6 +5960,12 @@ namespace VBW {
 	    return vglobal_[lv];
 	}
 
+	void set_v_global_index(index_t lv, global_index_t v) {
+	    vbw_assert(has_vglobal_);
+	    vbw_assert(lv < nb_v());
+	    vglobal_[lv] = v;
+	}
+	
 	bool has_v_global_index(global_index_t v) const;
 
 	ushort first_triangle() const {
@@ -5923,7 +5998,7 @@ namespace VBW {
 	    Triangle T = get_triangle(t);
 	    return index_t((llv==0)*T.i + (llv==1)*T.j + (llv==2)*T.k);
 	}
-	
+
 	bool triangle_is_user_marked(ushort t) {
 	    vbw_assert(has_tflags_);
 	    vbw_assert(t < max_t_);
@@ -5967,8 +6042,6 @@ namespace VBW {
 	    }
 	    return true;
 	}
-
-
 	
 	 index_t triangle_adjacent(index_t t, index_t le) const {
 	     vbw_assert(t < max_t());
@@ -6106,6 +6179,15 @@ namespace VBW {
 
 	void grow_v();
 
+
+      protected:
+
+        void set_vertex_plane(index_t v, vec4 P) {
+	    vbw_assert(v < max_v());
+	    plane_eqn_[v] = P;
+	    geometry_dirty_ = true;
+	}
+	
       private:
 
 	
@@ -6146,6 +6228,10 @@ namespace VBW {
 	vector<uchar> tflags_;
 	
 	bool has_tflags_;
+
+#ifndef STANDALONE_CONVEX_CELL	
+	bool use_exact_predicates_;
+#endif	
     };
 }
 
@@ -6580,6 +6666,7 @@ namespace GEO {
 #ifndef PERIODIC_DELAUNAY_TRIANGULATION_3D
 #define PERIODIC_DELAUNAY_TRIANGULATION_3D
 
+#include <stack>
 
 namespace GEO {
 
@@ -6589,6 +6676,38 @@ namespace GEO {
      
     class GEOGRAM_API PeriodicDelaunay3d : public Delaunay, public Periodic {
     public:
+
+        struct IncidentTetrahedra {
+	    std::stack<index_t> S;
+	    vector<index_t> incident_tets_set;
+
+	    void clear_incident_tets() {
+		incident_tets_set.resize(0);
+	    }
+
+	    void add_incident_tet(index_t t) {
+		incident_tets_set.push_back(t);
+	    }
+
+	    bool has_incident_tet(index_t t) const {
+		for(index_t i=0; i<incident_tets_set.size(); ++i) {
+		    if(incident_tets_set[i] == t) {
+			return true;
+		    }
+		}
+		return false;
+	    }
+
+	    vector<index_t>::const_iterator begin() const {
+		return incident_tets_set.begin();
+	    }
+
+	    vector<index_t>::const_iterator end() const {
+		return incident_tets_set.end();
+	    }
+        };
+	
+	
         PeriodicDelaunay3d(bool periodic, double period=1.0);
 
         virtual void set_vertices(
@@ -6598,23 +6717,52 @@ namespace GEO {
 	void set_weights(const double* weights);
 
 	void compute();
-	
-	vec3 vertex(index_t v) const;
 
-	double weight(index_t v) const;
+	void use_exact_predicates_for_convex_cell(bool x) {
+	    convex_cell_exact_predicates_ = x;
+	}
+	
+	vec3 vertex(index_t v) const {
+	    if(!periodic_) {
+		geo_debug_assert(v < nb_vertices());	    
+		return vec3(vertices_ + 3*v);
+	    }
+	    index_t instance = v/nb_vertices_non_periodic_;
+	    v = v%nb_vertices_non_periodic_;
+	    vec3 result(vertices_ + 3*v);
+	    result.x += double(translation[instance][0]) * period_;
+	    result.y += double(translation[instance][1]) * period_;
+	    result.z += double(translation[instance][2]) * period_;
+	    return result;
+	}
+
+	double weight(index_t v) const {
+	    if(weights_ == nullptr) {
+		return 0.0;
+	    }
+	    return periodic_ ? weights_[periodic_vertex_real(v)] : weights_[v] ;
+	}
 
         virtual index_t nearest_vertex(const double* p) const;
 
         virtual void set_BRIO_levels(const vector<index_t>& levels);
 
-	void get_incident_tets(index_t v, vector<index_t>& neighbors) const;
+	void get_incident_tets(index_t v, IncidentTetrahedra& W) const;
 
 	void copy_Laguerre_cell_from_Delaunay(
 	    GEO::index_t i,
 	    ConvexCell& C,
-	    GEO::vector<GEO::index_t>& neighbors
+	    IncidentTetrahedra& W
 	) const;         
 
+	void copy_Laguerre_cell_from_Delaunay(
+	    GEO::index_t i,
+	    ConvexCell& C
+	) const {
+	    IncidentTetrahedra W;
+	    copy_Laguerre_cell_from_Delaunay(i,C,W);
+	}
+	
 	bool has_empty_cells() const {
 	    return has_empty_cells_;
 	}
@@ -6630,7 +6778,7 @@ namespace GEO {
 	    double Pi_len2,
 	    GEO::index_t t,
 	    ConvexCell& C,
-	    GEO::vector<GEO::index_t>& neighbors
+	    IncidentTetrahedra& W
 	) const;
 	 
 	 
@@ -6645,12 +6793,11 @@ namespace GEO {
 	index_t get_periodic_vertex_instances_to_create(
 	    index_t v,
 	    ConvexCell& C,
-	    vector<index_t>& neighbors,
 	    bool use_instance[27],
 	    bool& cell_is_on_boundary,
-	    bool& cell_is_outside_cube
-	 );
-	
+	    bool& cell_is_outside_cube,
+	    IncidentTetrahedra& W
+	);
 
 	void insert_vertices(index_t b, index_t e);
 
@@ -6698,6 +6845,8 @@ namespace GEO {
 	bool has_empty_cells_;
 
 	index_t nb_reallocations_;
+
+	bool convex_cell_exact_predicates_;
     };
     
 
