@@ -3688,21 +3688,14 @@ namespace {
 
     void import_arg_group_gfx() {
         declare_arg_group("gfx", "OpenGL graphics options", ARG_ADVANCED);
-
-
-// Default profile will be "core" in a short future for all architectures,
-// but some users reported problems with it, so I keep for now
-// "compatibility" as the default (except on Mac/OS that prefers "core")	
         declare_arg(
             "gfx:GL_profile",
-#if defined(GEO_OS_APPLE)
+#if defined(GEO_OS_ANDROID)
+	    "ES",	    		    
+#else		    
 	    "core",
-#elif defined(GEO_OS_ANDROID)
-	    "ES",	    
-#else
-	    "compatibility",	    
 #endif	    
-            "one of core,compatibility,ES"
+            "one of core,ES"
         );
         declare_arg(
             "gfx:GL_version", 0.0,
@@ -3713,16 +3706,12 @@ namespace {
             "OpenGL debugging context"
         );
         declare_arg(
-            "gfx:GLSL", true,
-            "Use GLSL shaders (requires a decently recent gfx board)"
-        );
-        declare_arg(
             "gfx:GLSL_version", 0.0,
             "If non-zero, overrides GLSL version detection"
         );
         declare_arg(
             "gfx:GLUP_profile", "auto",
-            "one of auto, GLUP150, GLUP440, VanillaGL"
+            "one of auto, GLUP150, GLUP440, GLUPES"
         );
         declare_arg("gfx:full_screen", false, "full screen mode");
         declare_arg(
@@ -3736,7 +3725,7 @@ namespace {
         declare_arg(
             "gfx:GLSL_tesselation", true, "use tesselation shaders if available"
         );
-	declare_arg("gfx:geometry", "800x800", "resolution");
+	declare_arg("gfx:geometry", "1024x1024", "resolution");
     }
     
     void import_arg_group_biblio() {
@@ -8125,7 +8114,7 @@ namespace {
         ) :
             M_(M)
         {
-            geo_debug_assert(e > b);
+            geo_debug_assert(e >= b);
 	    geo_cite_with_info(
 		"WEB:SpatialSorting",
 		"The implementation of spatial sort in GEOGRAM is inspired by "
@@ -8639,7 +8628,7 @@ namespace GEO {
        
         //The next three lines replace the following commented-out line
         //(random_shuffle is deprecated in C++17, and they call this 
-        // progess...)
+        // progress...)
         // std::random_shuffle(b,e);
         std::random_device rng;
         std::mt19937 urng(rng());
@@ -17765,6 +17754,92 @@ inline int dot_3d_filter( const double* p0, const double* p1, const double* p2) 
     return int_tmp_result;
 } 
 
+/******* extracted from ../numerics/predicates/dot_compare_3d.h *******/
+
+inline int dot_compare_3d_filter( const double* p0, const double* p1, const double* p2) {
+    double d1;
+    d1 = (((p0[0] * p1[0]) + (p0[1] * p1[1])) + (p0[2] * p1[2]));
+    double d2;
+    d2 = (((p0[0] * p2[0]) + (p0[1] * p2[1])) + (p0[2] * p2[2]));
+    int int_tmp_result;
+    double double_tmp_result;
+    double eps;
+    double_tmp_result = (d1 - d2);
+    double max1 = fabs(p0[0]);
+    if( (max1 < fabs(p0[1])) )
+    {
+        max1 = fabs(p0[1]);
+    } 
+    if( (max1 < fabs(p0[2])) )
+    {
+        max1 = fabs(p0[2]);
+    } 
+    double max2 = fabs(p1[0]);
+    if( (max2 < fabs(p1[1])) )
+    {
+        max2 = fabs(p1[1]);
+    } 
+    if( (max2 < fabs(p1[2])) )
+    {
+        max2 = fabs(p1[2]);
+    } 
+    if( (max2 < fabs(p2[0])) )
+    {
+        max2 = fabs(p2[0]);
+    } 
+    if( (max2 < fabs(p2[1])) )
+    {
+        max2 = fabs(p2[1]);
+    } 
+    if( (max2 < fabs(p2[2])) )
+    {
+        max2 = fabs(p2[2]);
+    } 
+    double lower_bound_1;
+    double upper_bound_1;
+    lower_bound_1 = max1;
+    upper_bound_1 = max1;
+    if( (max2 < lower_bound_1) )
+    {
+        lower_bound_1 = max2;
+    } 
+    else 
+    {
+        if( (max2 > upper_bound_1) )
+        {
+            upper_bound_1 = max2;
+        } 
+    } 
+    if( (lower_bound_1 < 3.01698158319050667656e-147) )
+    {
+        return FPG_UNCERTAIN_VALUE;
+    } 
+    else 
+    {
+        if( (upper_bound_1 > 1.67597599124282407923e+153) )
+        {
+            return FPG_UNCERTAIN_VALUE;
+        } 
+        eps = (2.44455106181954323552e-15 * (max1 * max2));
+        if( (double_tmp_result > eps) )
+        {
+            int_tmp_result = 1;
+        } 
+        else 
+        {
+            if( (double_tmp_result < -eps) )
+            {
+                int_tmp_result = -1;
+            } 
+            else 
+            {
+                return FPG_UNCERTAIN_VALUE;
+            } 
+        } 
+    } 
+    return int_tmp_result;
+}
+
 /******* extracted from ../numerics/predicates/det3d.h *******/
 
 inline int det_3d_filter( const double* p0, const double* p1, const double* p2) {
@@ -19731,6 +19806,26 @@ namespace {
 
 	return Delta.sign();
     }
+
+    Sign dot_compare_3d_exact(
+	const double* v0, const double* v1, const double* v2
+    ) {
+	const expansion& d01_0 = expansion_product(v0[0], v1[0]);
+	const expansion& d01_1 = expansion_product(v0[1], v1[1]);
+	const expansion& d01_2 = expansion_product(v0[2], v1[2]);
+	const expansion& d01_12 = expansion_sum(d01_1, d01_2);
+	const expansion& d01 = expansion_sum(d01_0, d01_12);
+	
+	const expansion& d02_0 = expansion_product(v0[0], v2[0]);
+	const expansion& d02_1 = expansion_product(v0[1], v2[1]);
+	const expansion& d02_2 = expansion_product(v0[2], v2[2]);
+	const expansion& d02_12 = expansion_sum(d02_1, d02_2);
+	const expansion& d02 = expansion_sum(d02_0, d02_12);
+
+	const expansion& result = expansion_diff(d01, d02);
+	
+	return result.sign();
+    }
     
     // ================================ statistics ========================
 
@@ -20197,15 +20292,24 @@ namespace GEO {
 	Sign dot_3d(
 	    const double* p0, const double* p1, const double* p2
 	) {
-	    Sign result = Sign(
-		det_3d_filter(p0, p1, p2)
-	    );
+	    Sign result = Sign(det_3d_filter(p0, p1, p2));
 	    if(result == 0) {
 		result = dot_3d_exact(p0, p1, p2);
 	    }
 	    return result;
 	}
 
+	Sign dot_compare_3d(
+	    const double* v0, const double* v1, const double* v2
+	) {
+	    Sign result = Sign(dot_compare_3d_filter(v0, v1, v2));
+	    if(result == 0) {
+		result = dot_compare_3d_exact(v0, v1, v2);
+	    }
+	    return result;
+	}
+
+	
 	bool points_are_identical_2d(
 	    const double* p1,
 	    const double* p2
@@ -26660,6 +26764,57 @@ namespace VBW {
 	geometry_dirty_ = true;
     }
     
+
+    void ConvexCell::init_with_tet(
+	vec4 P0, vec4 P1, vec4 P2, vec4 P3
+    ) {
+	clear();
+
+	// The vertex at infinity.
+ 	plane_eqn_[0] = make_vec4(0,0,0,0);
+
+	// Offset for the 4 plane equations.
+	// Plane 0 is vertex at infinity.
+	index_t boff = 1;
+
+	plane_eqn_[boff  ] = P0;
+	plane_eqn_[boff+1] = P1;
+	plane_eqn_[boff+2] = P2;
+	plane_eqn_[boff+3] = P3;
+
+	new_triangle(boff+3, boff+2, boff+1);
+	new_triangle(boff+3, boff+0, boff+2);
+	new_triangle(boff+3, boff+1, boff+0);
+	new_triangle(boff+2, boff+0, boff+1);
+	
+	// We already created 6 vertices (for the 6 bounding box
+	// plane equations) plus the vertex at infinity.
+	nb_v_ = 5;
+
+	geometry_dirty_ = true;
+    }
+
+
+    void ConvexCell::init_with_tet(
+	vec4 P0, vec4 P1, vec4 P2, vec4 P3,
+	index_t P0_global_index,
+	index_t P1_global_index,
+	index_t P2_global_index,
+	index_t P3_global_index	    
+    ) {
+	geo_debug_assert(has_vglobal_);
+	init_with_tet(P0, P1, P2, P3);
+
+	// Offset for the 4 plane equations.
+	// Plane 0 is vertex at infinity.
+	index_t boff = 1;
+
+	vglobal_[boff  ] = P0_global_index;
+	vglobal_[boff+1] = P1_global_index;
+	vglobal_[boff+2] = P2_global_index;
+	vglobal_[boff+3] = P3_global_index;	
+    }
+    
     
     
 
@@ -26688,11 +26843,20 @@ namespace VBW {
 	    index_t t = first_valid_;
 	    while(t != END_OF_LIST) { 
 		TriangleWithFlags T = get_triangle_and_flags(t);
-		vec4 p = compute_triangle_point(T);
-		p.x /= p.w;
-		p.y /= p.w;
-		p.z /= p.w;
-		p.w = 1.0;
+		vec4 p;
+		if(geometry_dirty_) {
+		    p = compute_triangle_point(T);
+		    p.x /= p.w;
+		    p.y /= p.w;
+		    p.z /= p.w;
+		    p.w = 1.0;
+		} else {
+		    p.x = triangle_point_[t].x;
+		    p.y = triangle_point_[t].y;
+		    p.z = triangle_point_[t].z;
+		    p.w = 1.0;
+		}
+
 		if(shrink != 0.0) {
 		    p.x = shrink * g.x + (1.0 - shrink) * p.x;
 		    p.y = shrink * g.y + (1.0 - shrink) * p.y;
@@ -27226,6 +27390,7 @@ namespace VBW {
 	
 	if(v2t_[v] != END_OF_LIST) {
 	    index_t t = v2t_[v];
+	    index_t count = 0;
 	    do {
 		if(cur < 2) {
 		    t1t2[cur] = ushort(t);
@@ -27240,6 +27405,8 @@ namespace VBW {
 		++cur;
 		index_t lv = triangle_find_vertex(t,v);		   
 		t = triangle_adjacent(t, (lv + 1)%3);
+		++count;
+		geo_assert(count < 100000);
 	    } while(t != v2t_[v]);
 	}
 	
@@ -27284,6 +27451,8 @@ namespace VBW {
 	    ushort t1t2[2];
 	    index_t cur=0;
 	    index_t t = v2t_[v];
+
+	    index_t count = 0;
 	    do {
 		if(cur < 2) {
 		    t1t2[cur] = ushort(t);
@@ -27299,15 +27468,29 @@ namespace VBW {
 		++cur;
 		index_t lv = triangle_find_vertex(t,v);		   
 		t = triangle_adjacent(t, (lv + 1)%3);
+		++count;
+		geo_assert(count < 100000);
 	    } while(t != v2t_[v]);
 	}
 	return result;
     }
 
     vec3 ConvexCell::barycenter() const {
+	vec3 result;
+	double m;
+	compute_mg(m, result);
+	if(m != 0.0) {
+	    result.x /= m;
+	    result.y /= m;
+	    result.z /= m;
+	}
+	return result;
+    }
+    
+    void ConvexCell::compute_mg(double& m, vec3& result) const {
 	vbw_assert(!geometry_dirty_);
-	vec3 result = make_vec3(0.0, 0.0, 0.0);
-	double m = 0.0;
+	result = make_vec3(0.0, 0.0, 0.0);
+	m = 0.0;
 
 	ushort t_origin = END_OF_LIST;
 	for(index_t v=0; v<nb_v_; ++v) {
@@ -27321,6 +27504,7 @@ namespace VBW {
 	    ushort t1t2[2];
 	    index_t cur=0;
 	    index_t t = v2t_[v];
+	    index_t count = 0;
 	    do {
 		if(cur < 2) {
 		    t1t2[cur] = ushort(t);
@@ -27339,15 +27523,10 @@ namespace VBW {
 		++cur;
 		index_t lv = triangle_find_vertex(t,v);		   
 		t = triangle_adjacent(t, (lv + 1)%3);
+		++count;
+		geo_assert(count < 100000);
 	    } while(t != v2t_[v]);
 	}
-	
-	if(m != 0.0) {
-	    result.x /= m;
-	    result.y /= m;
-	    result.z /= m;
-	}
-	return result;
     }
     
     
@@ -27376,8 +27555,13 @@ namespace VBW {
     double ConvexCell::squared_inner_radius(vec3 center) const {
 	double result = std::numeric_limits<double>::max();
 	for(index_t v=0; v<nb_v(); ++v) {
+	    vec4 P = vertex_plane(v);
+	    // Ignore vertex at infinity.
+	    if(P.x == 0.0 && P.y == 0.0 && P.z == 0.0) {
+		continue;
+	    }
 	    result = std::min(
-		result, squared_point_plane_distance(center, vertex_plane(v))
+		result, squared_point_plane_distance(center, P)
 	    );
 	}
 	return result;
@@ -29550,6 +29734,8 @@ namespace GEO {
     void PeriodicDelaunay3d::set_vertices(
         index_t nb_vertices, const double* vertices
     ) {
+	has_empty_cells_ = false;
+	
 	#ifndef GARGANTUA
 	{
 	    Numeric::uint64 expected_max_index =
@@ -29598,6 +29784,7 @@ namespace GEO {
     }
 
     void PeriodicDelaunay3d::set_weights(const double* weights) {
+	has_empty_cells_ = false;
 	weights_ = weights;	
     }
     
@@ -30474,12 +30661,12 @@ namespace GEO {
 		// boundary facets on which the vertex resides.
 		if(vertex_on_boundary) {
 		    cell_is_on_boundary = true;
-		    for(int U=0; U<2; ++U) {
-			for(int V=0; V<2; ++V) {
-			    for(int W=0; W<2; ++W) {
-				int Tx = U*VXLAT[0][0] + V*VXLAT[1][0] + W*VXLAT[2][0];
-				int Ty = U*VXLAT[0][1] + V*VXLAT[1][1] + W*VXLAT[2][1];
-				int Tz = U*VXLAT[0][2] + V*VXLAT[1][2] + W*VXLAT[2][2];
+		    for(int dU=0; dU<2; ++dU) {
+			for(int dV=0; dV<2; ++dV) {
+			    for(int dW=0; dW<2; ++dW) {
+				int Tx = dU*VXLAT[0][0] + dV*VXLAT[1][0] + dW*VXLAT[2][0];
+				int Ty = dU*VXLAT[0][1] + dV*VXLAT[1][1] + dW*VXLAT[2][1];
+				int Tz = dU*VXLAT[0][2] + dV*VXLAT[1][2] + dW*VXLAT[2][2];
 				use_instance[T_to_instance(Tx,Ty,Tz)] = true;
 			    }
 			}
