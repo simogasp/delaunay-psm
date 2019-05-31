@@ -825,6 +825,20 @@ namespace GEO {
         return y;
     }
 
+    template <index_t DIM, class FT> inline
+    vecng<DIM,FT> mult(
+        const Matrix<DIM, FT>& M, const vecng<DIM,FT>& x
+    ) {
+        vecng<DIM,FT> y;
+        for(index_t i = 0; i < DIM; i++) {
+            y[i] = 0;
+            for(index_t j = 0; j < DIM; j++) {
+                y[i] += M(i, j) * x[j];
+            }
+        }
+        return y;
+    }
+
     
     
 }
@@ -1753,6 +1767,11 @@ namespace GEO {
         std::string GEOGRAM_API home_directory();
 
         std::string GEOGRAM_API documents_directory();
+
+#ifdef GEO_OS_EMSCRIPTEN
+	void set_file_system_changed_callback(void(*callback)());
+#endif	
+	
     }
 }
 
@@ -2051,6 +2070,8 @@ namespace {
     using namespace CmdLine;
 
     std::string config_file_name = "geogram.ini";
+    bool auto_create_args = false;
+    bool loaded_config_file = false;
     
     int geo_argc = 0;
     char** geo_argv = nullptr;
@@ -2178,24 +2199,12 @@ namespace {
         return false;
     }
 
-    void parse_config_file(int argc, char** argv) {
-	geo_assert(argc >= 1);
-	std::string program_name = String::to_uppercase(FileSystem::base_name(argv[0]));
-	static bool init = false;
-	if(init) {
-	    return;
-	}
-	init = true;
-	Logger::out("config") << "Configuration file name:" << config_file_name
-			      << std::endl;
-	Logger::out("config") << "Home directory:" << FileSystem::home_directory()
-			      << std::endl;
-	std::string config_filename = FileSystem::home_directory() + "/" + config_file_name;
+
+    void parse_config_file(
+	const std::string& config_filename, const std::string& program_name
+    ) {
 	std::string section = "*";
 	if(FileSystem::is_file(config_filename)) {
-	    Logger::out("config") << "Using configuration file:"
-				       << config_filename
-				       << std::endl;
 	    std::ifstream in(config_filename.c_str());
 	    std::string line;
 	    while(std::getline(in,line)) {
@@ -2209,12 +2218,33 @@ namespace {
 			if(CmdLine::arg_is_declared(argname)) {
 			    CmdLine::set_arg(argname, argval);
 			} else {
-			    Logger::warn("config") << argname << "=" << argval << " ignored" << std::endl;
+			    if(auto_create_args) {
+				CmdLine::declare_arg(argname, argval, "...");
+			    } else {
+				Logger::warn("config") << argname << "=" << argval << " ignored" << std::endl;
+			    }
 			}
 		    }
 		}
 	    }
+	    loaded_config_file= true;
 	}
+    }
+    
+    void parse_config_file(int argc, char** argv) {
+	geo_assert(argc >= 1);
+	std::string program_name = String::to_uppercase(FileSystem::base_name(argv[0]));
+	static bool init = false;
+	if(init) {
+	    return;
+	}
+	init = true;
+	Logger::out("config") << "Configuration file name:" << config_file_name
+			      << std::endl;
+	Logger::out("config") << "Home directory:" << FileSystem::home_directory()
+			      << std::endl;
+	std::string config_filename = FileSystem::home_directory() + "/" + config_file_name;
+	parse_config_file(config_filename, program_name);
     }
     
     bool parse_internal(
@@ -2406,12 +2436,24 @@ namespace GEO {
 	    return geo_argv;
 	}
 
-	void set_config_file_name(const std::string& filename) {
+	void set_config_file_name(const std::string& filename, bool auto_create) {
 	    config_file_name = filename;
+	    auto_create_args = auto_create;
 	}
 
 	std::string get_config_file_name() {
 	    return config_file_name;
+	}
+
+	void load_config(
+	    const std::string& filename, const std::string& program_name
+	) {
+	    parse_config_file(filename, program_name);
+	}
+	
+
+	bool config_file_loaded() {
+	    return loaded_config_file;
 	}
 	
         bool parse(
@@ -4639,6 +4681,10 @@ extern "C" {
 #include <stdio.h>
 #endif
 
+#ifdef GEO_OS_EMSCRIPTEN
+#include <emscripten.h>
+#endif
+
 namespace GEO {
 
     namespace FileSystem {
@@ -5196,12 +5242,33 @@ namespace GEO {
 #endif
             return home;
         }
-        
-    }
 
-    
+#ifdef GEO_OS_EMSCRIPTEN
+	static void (*file_system_changed_callback_)() = nullptr;
+	
+	void set_file_system_changed_callback(void(*callback)()) {
+	    file_system_changed_callback_ = callback;
+	}
+
+#endif    
+	
+    } // end namespace FileSystem
+} // end namespace GEO
+
+
+#ifdef GEO_OS_EMSCRIPTEN
+
+extern "C" {
+    void file_system_changed_callback();
 }
 
+EMSCRIPTEN_KEEPALIVE void file_system_changed_callback() {
+    if(GEO::FileSystem::file_system_changed_callback_ != nullptr) {
+	(*GEO::FileSystem::file_system_changed_callback_)();
+    }
+}
+
+#endif
 
 /******* extracted from ../basic/packed_arrays.cpp *******/
 
@@ -5612,6 +5679,8 @@ namespace GEO {
 
 /******* extracted from ../basic/process.cpp *******/
 
+#include <thread>
+#include <chrono>
 
 #ifdef GEO_OPENMP
 #include <omp.h>
@@ -6331,6 +6400,12 @@ namespace GEO {
 	    threads.push_back(new ParallelThread(f8));	    
             Process::run_threads(threads);
         }
+    }
+
+    namespace Process {
+	void sleep(index_t microseconds) {
+	    std::this_thread::sleep_for(std::chrono::microseconds(microseconds));	    
+	}
     }
 }
 
@@ -7353,6 +7428,9 @@ namespace GEO {
             _CrtSetReportFile(_CRT_WARN, _CRTDBG_FILE_STDERR);
             _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
             _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
+ 
+            // Do not open dialog box on error 
+	    SetErrorMode(SEM_NOGPFAULTERRORBOX);
         }
 #else
         void os_install_signal_handlers() {
@@ -7886,17 +7964,16 @@ namespace {
 
         double center(index_t f) const {
             double result = 0.0;
+	    double s = 1.0 / double(mesh_.facets.nb_vertices(f));
             for(
                 index_t c = mesh_.facets.corners_begin(f);
                 c < mesh_.facets.corners_end(f); ++c
             ) {
-                result += mesh_.vertices.point_ptr(
+                result += s*mesh_.vertices.point_ptr(
                     mesh_.facet_corners.vertex(c)
-                )[COORD];
+		)[COORD]; 
             }
             return result;
-            // TODO: should be  / double(mesh_.facets.nb_vertices(f));
-            // but this breaks one of the tests, to be investigated...
         }
 
     private:
@@ -17754,92 +17831,6 @@ inline int dot_3d_filter( const double* p0, const double* p1, const double* p2) 
     return int_tmp_result;
 } 
 
-/******* extracted from ../numerics/predicates/dot_compare_3d.h *******/
-
-inline int dot_compare_3d_filter( const double* p0, const double* p1, const double* p2) {
-    double d1;
-    d1 = (((p0[0] * p1[0]) + (p0[1] * p1[1])) + (p0[2] * p1[2]));
-    double d2;
-    d2 = (((p0[0] * p2[0]) + (p0[1] * p2[1])) + (p0[2] * p2[2]));
-    int int_tmp_result;
-    double double_tmp_result;
-    double eps;
-    double_tmp_result = (d1 - d2);
-    double max1 = fabs(p0[0]);
-    if( (max1 < fabs(p0[1])) )
-    {
-        max1 = fabs(p0[1]);
-    } 
-    if( (max1 < fabs(p0[2])) )
-    {
-        max1 = fabs(p0[2]);
-    } 
-    double max2 = fabs(p1[0]);
-    if( (max2 < fabs(p1[1])) )
-    {
-        max2 = fabs(p1[1]);
-    } 
-    if( (max2 < fabs(p1[2])) )
-    {
-        max2 = fabs(p1[2]);
-    } 
-    if( (max2 < fabs(p2[0])) )
-    {
-        max2 = fabs(p2[0]);
-    } 
-    if( (max2 < fabs(p2[1])) )
-    {
-        max2 = fabs(p2[1]);
-    } 
-    if( (max2 < fabs(p2[2])) )
-    {
-        max2 = fabs(p2[2]);
-    } 
-    double lower_bound_1;
-    double upper_bound_1;
-    lower_bound_1 = max1;
-    upper_bound_1 = max1;
-    if( (max2 < lower_bound_1) )
-    {
-        lower_bound_1 = max2;
-    } 
-    else 
-    {
-        if( (max2 > upper_bound_1) )
-        {
-            upper_bound_1 = max2;
-        } 
-    } 
-    if( (lower_bound_1 < 3.01698158319050667656e-147) )
-    {
-        return FPG_UNCERTAIN_VALUE;
-    } 
-    else 
-    {
-        if( (upper_bound_1 > 1.67597599124282407923e+153) )
-        {
-            return FPG_UNCERTAIN_VALUE;
-        } 
-        eps = (2.44455106181954323552e-15 * (max1 * max2));
-        if( (double_tmp_result > eps) )
-        {
-            int_tmp_result = 1;
-        } 
-        else 
-        {
-            if( (double_tmp_result < -eps) )
-            {
-                int_tmp_result = -1;
-            } 
-            else 
-            {
-                return FPG_UNCERTAIN_VALUE;
-            } 
-        } 
-    } 
-    return int_tmp_result;
-}
-
 /******* extracted from ../numerics/predicates/det3d.h *******/
 
 inline int det_3d_filter( const double* p0, const double* p1, const double* p2) {
@@ -18249,6 +18240,248 @@ inline int aligned_3d_filter( const double* p0, const double* p1, const double* 
     } 
     return ((((int_tmp_result == 0) && (int_tmp_result_FFWKCAA == 0)) && (int_tmp_result_k60Ocge == 0)) ? 0 : 1);
 } 
+
+/******* extracted from ../numerics/predicates/dot_compare_3d.h *******/
+
+inline int dot_compare_3d_filter( const double* p0, const double* p1, const double* p2) {
+    double d1;
+    d1 = (((p0[0] * p1[0]) + (p0[1] * p1[1])) + (p0[2] * p1[2]));
+    double d2;
+    d2 = (((p0[0] * p2[0]) + (p0[1] * p2[1])) + (p0[2] * p2[2]));
+    int int_tmp_result;
+    double double_tmp_result;
+    double eps;
+    double_tmp_result = (d1 - d2);
+    double max1 = fabs(p0[0]);
+    if( (max1 < fabs(p0[1])) )
+    {
+        max1 = fabs(p0[1]);
+    } 
+    if( (max1 < fabs(p0[2])) )
+    {
+        max1 = fabs(p0[2]);
+    } 
+    double max2 = fabs(p1[0]);
+    if( (max2 < fabs(p1[1])) )
+    {
+        max2 = fabs(p1[1]);
+    } 
+    if( (max2 < fabs(p1[2])) )
+    {
+        max2 = fabs(p1[2]);
+    } 
+    if( (max2 < fabs(p2[0])) )
+    {
+        max2 = fabs(p2[0]);
+    } 
+    if( (max2 < fabs(p2[1])) )
+    {
+        max2 = fabs(p2[1]);
+    } 
+    if( (max2 < fabs(p2[2])) )
+    {
+        max2 = fabs(p2[2]);
+    } 
+    double lower_bound_1;
+    double upper_bound_1;
+    lower_bound_1 = max1;
+    upper_bound_1 = max1;
+    if( (max2 < lower_bound_1) )
+    {
+        lower_bound_1 = max2;
+    } 
+    else 
+    {
+        if( (max2 > upper_bound_1) )
+        {
+            upper_bound_1 = max2;
+        } 
+    } 
+    if( (lower_bound_1 < 3.01698158319050667656e-147) )
+    {
+        return FPG_UNCERTAIN_VALUE;
+    } 
+    else 
+    {
+        if( (upper_bound_1 > 1.67597599124282407923e+153) )
+        {
+            return FPG_UNCERTAIN_VALUE;
+        } 
+        eps = (2.44455106181954323552e-15 * (max1 * max2));
+        if( (double_tmp_result > eps) )
+        {
+            int_tmp_result = 1;
+        } 
+        else 
+        {
+            if( (double_tmp_result < -eps) )
+            {
+                int_tmp_result = -1;
+            } 
+            else 
+            {
+                return FPG_UNCERTAIN_VALUE;
+            } 
+        } 
+    } 
+    return int_tmp_result;
+} 
+
+
+/******* extracted from ../numerics/predicates/det_compare_4d.h *******/
+
+inline int det_compare_4d_filter( const double* p0, const double* p1, const double* p2, const double* p3, const double* p4) {
+    double a3_0;
+    a3_0 = (p4[0] - p3[0]);
+    double a3_1;
+    a3_1 = (p4[1] - p3[1]);
+    double a3_2;
+    a3_2 = (p4[2] - p3[2]);
+    double a3_3;
+    a3_3 = (p4[3] - p3[3]);
+    double m12;
+    m12 = ((p1[0] * p0[1]) - (p0[0] * p1[1]));
+    double m13;
+    m13 = ((p2[0] * p0[1]) - (p0[0] * p2[1]));
+    double m14;
+    m14 = ((a3_0 * p0[1]) - (p0[0] * a3_1));
+    double m23;
+    m23 = ((p2[0] * p1[1]) - (p1[0] * p2[1]));
+    double m24;
+    m24 = ((a3_0 * p1[1]) - (p1[0] * a3_1));
+    double m34;
+    m34 = ((a3_0 * p2[1]) - (p2[0] * a3_1));
+    double m123;
+    m123 = (((m23 * p0[2]) - (m13 * p1[2])) + (m12 * p2[2]));
+    double m124;
+    m124 = (((m24 * p0[2]) - (m14 * p1[2])) + (m12 * a3_2));
+    double m134;
+    m134 = (((m34 * p0[2]) - (m14 * p2[2])) + (m13 * a3_2));
+    double m234;
+    m234 = (((m34 * p1[2]) - (m24 * p2[2])) + (m23 * a3_2));
+    double Delta;
+    Delta = ((((m234 * p0[3]) - (m134 * p1[3])) + (m124 * p2[3])) - (m123 * a3_3));
+    int int_tmp_result;
+    double eps;
+    double max1 = fabs(p0[0]);
+    if( (max1 < fabs(p1[0])) )
+    {
+        max1 = fabs(p1[0]);
+    } 
+    if( (max1 < fabs(p2[0])) )
+    {
+        max1 = fabs(p2[0]);
+    } 
+    if( (max1 < fabs(a3_0)) )
+    {
+        max1 = fabs(a3_0);
+    } 
+    double max2 = fabs(p0[1]);
+    if( (max2 < fabs(p1[1])) )
+    {
+        max2 = fabs(p1[1]);
+    } 
+    if( (max2 < fabs(p2[1])) )
+    {
+        max2 = fabs(p2[1]);
+    } 
+    if( (max2 < fabs(a3_1)) )
+    {
+        max2 = fabs(a3_1);
+    } 
+    double max3 = fabs(p0[2]);
+    if( (max3 < fabs(p1[2])) )
+    {
+        max3 = fabs(p1[2]);
+    } 
+    if( (max3 < fabs(p2[2])) )
+    {
+        max3 = fabs(p2[2]);
+    } 
+    if( (max3 < fabs(a3_2)) )
+    {
+        max3 = fabs(a3_2);
+    } 
+    double max4 = fabs(p0[3]);
+    if( (max4 < fabs(p1[3])) )
+    {
+        max4 = fabs(p1[3]);
+    } 
+    if( (max4 < fabs(p2[3])) )
+    {
+        max4 = fabs(p2[3]);
+    } 
+    if( (max4 < fabs(a3_3)) )
+    {
+        max4 = fabs(a3_3);
+    } 
+    double lower_bound_1;
+    double upper_bound_1;
+    lower_bound_1 = max1;
+    upper_bound_1 = max1;
+    if( (max2 < lower_bound_1) )
+    {
+        lower_bound_1 = max2;
+    } 
+    else 
+    {
+        if( (max2 > upper_bound_1) )
+        {
+            upper_bound_1 = max2;
+        } 
+    } 
+    if( (max3 < lower_bound_1) )
+    {
+        lower_bound_1 = max3;
+    } 
+    else 
+    {
+        if( (max3 > upper_bound_1) )
+        {
+            upper_bound_1 = max3;
+        } 
+    } 
+    if( (max4 < lower_bound_1) )
+    {
+        lower_bound_1 = max4;
+    } 
+    else 
+    {
+        if( (max4 > upper_bound_1) )
+        {
+            upper_bound_1 = max4;
+        } 
+    } 
+    if( (lower_bound_1 < 3.11018333467425326847e-74) )
+    {
+        return FPG_UNCERTAIN_VALUE;
+    } 
+    else 
+    {
+        if( (upper_bound_1 > 1.44740111546645196071e+76) )
+        {
+            return FPG_UNCERTAIN_VALUE;
+        } 
+        eps = (2.37793769622390420735e-14 * (((max1 * max2) * max3) * max4));
+        if( (Delta > eps) )
+        {
+            int_tmp_result = 1;
+        } 
+        else 
+        {
+            if( (Delta < -eps) )
+            {
+                int_tmp_result = -1;
+            } 
+            else 
+            {
+                return FPG_UNCERTAIN_VALUE;
+            } 
+        } 
+    } 
+    return int_tmp_result;
+} 
+
 
 /******* extracted from ../numerics/predicates.cpp *******/
 
@@ -20274,6 +20507,46 @@ namespace GEO {
 	    return result;
 	}
 
+
+	Sign det_compare_4d(
+	    const double* p0, const double* p1,
+	    const double* p2, const double* p3,
+	    const double* p4
+	) {
+	    Sign result = Sign(
+		det_compare_4d_filter(p0, p1, p2, p3, p4)
+	    );
+	    if(result == 0) {
+		const expansion& p0_0 = expansion_create(p0[0]);
+		const expansion& p0_1 = expansion_create(p0[1]);
+		const expansion& p0_2 = expansion_create(p0[2]);
+		const expansion& p0_3 = expansion_create(p0[3]);		
+		
+		const expansion& p1_0 = expansion_create(p1[0]);
+		const expansion& p1_1 = expansion_create(p1[1]);
+		const expansion& p1_2 = expansion_create(p1[2]);
+		const expansion& p1_3 = expansion_create(p1[3]);		
+		
+		const expansion& p2_0 = expansion_create(p2[0]);
+		const expansion& p2_1 = expansion_create(p2[1]);
+		const expansion& p2_2 = expansion_create(p2[2]);
+		const expansion& p2_3 = expansion_create(p2[3]);
+
+		const expansion& a3_0 = expansion_diff(p4[0],p3[0]);
+		const expansion& a3_1 = expansion_diff(p4[1],p3[1]);
+		const expansion& a3_2 = expansion_diff(p4[2],p3[2]);
+		const expansion& a3_3 = expansion_diff(p4[3],p3[3]);			
+
+		result = sign_of_expansion_determinant(
+		    p0_0, p0_1, p0_2, p0_3,
+		    p1_0, p1_1, p1_2, p1_3,
+		    p2_0, p2_1, p2_2, p2_3,
+		    a3_0, a3_1, a3_2, a3_3		    
+		);
+	    }
+	    return result;
+	}
+	
 	
 	bool aligned_3d(
 	    const double* p0, const double* p1, const double* p2
@@ -27236,7 +27509,7 @@ namespace VBW {
         // Find the intersection of the three planes using Kramer's formula.
 	// (see Edelsbrunner - Simulation of Simplicity for other examples).
 	// 
-	// Kramer's formula: each component of the solution is obtained as
+	// Cramer's formula: each component of the solution is obtained as
 	//  the ratio of two determinants:
 	//   - the determinant of the system where the ith column is replaced 
 	//     with the rhs

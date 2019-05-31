@@ -2624,6 +2624,7 @@ namespace GEO {
 
         static Thread* current();
 
+
     protected:
         
         virtual ~Thread();
@@ -2715,6 +2716,9 @@ namespace GEO {
 
         void GEOGRAM_API terminate();
 
+
+	void GEOGRAM_API sleep(index_t microseconds);
+	
         void GEOGRAM_API show_stats();
         
         void GEOGRAM_API brute_force_kill();
@@ -4207,6 +4211,20 @@ namespace GEO {
         return y;
     }
 
+    template <index_t DIM, class FT> inline
+    vecng<DIM,FT> mult(
+        const Matrix<DIM, FT>& M, const vecng<DIM,FT>& x
+    ) {
+        vecng<DIM,FT> y;
+        for(index_t i = 0; i < DIM; i++) {
+            y[i] = 0;
+            for(index_t j = 0; j < DIM; j++) {
+                y[i] += M(i, j) * x[j];
+            }
+        }
+        return y;
+    }
+
     
     
 }
@@ -4789,6 +4807,12 @@ namespace GEO {
 	    const double* p0, const double* p1,
 	    const double* p2, const double* p3
 	);
+
+	Sign GEOGRAM_API det_compare_4d(
+	    const double* p0, const double* p1,
+	    const double* p2, const double* p3,
+	    const double* p4
+	);
 	
 	bool GEOGRAM_API aligned_3d(
 	    const double* p0, const double* p1, const double* p2
@@ -5348,9 +5372,18 @@ namespace GEO {
         void GEOGRAM_API terminate();
 
 
-	void GEOGRAM_API set_config_file_name(const std::string& filename);
+	void GEOGRAM_API set_config_file_name(
+	    const std::string& filename,
+	    bool auto_create_args = false
+	);
 
+	bool GEOGRAM_API config_file_loaded();
+	
 	std::string GEOGRAM_API get_config_file_name();
+
+	void GEOGRAM_API load_config(
+	    const std::string& filename, const std::string& program_name
+	);
 	
         enum ArgType {
             
@@ -6075,6 +6108,14 @@ namespace VBW {
 	     return vv2t(v2,v1);
 	 }
 
+         index_t triangle_vertex(index_t t, index_t lv) const {
+	     vbw_assert(t < max_t());
+	     vbw_assert(lv < 3);
+	     Triangle T = get_triangle(t);
+	     return index_t((lv==0)*T.i+(lv==1)*T.j+(lv==2)*T.k);
+	 }
+
+      
 	index_t triangle_find_vertex(index_t t, index_t v) const {
 	    vbw_assert(t < max_t());
 	    Triangle T = get_triangle(t);
@@ -6285,12 +6326,6 @@ namespace VBW {
 
 namespace GEO {
     using VBW::ConvexCell;
-}
-
-namespace std {
-    template<> inline void swap(VBW::ConvexCell& c1, VBW::ConvexCell& c2) {
-	c1.swap(c2);
-    }
 }
 
 #endif
