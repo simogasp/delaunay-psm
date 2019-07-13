@@ -5599,6 +5599,21 @@ namespace GEO {
     }
 }
 
+
+#ifdef GEO_OS_ANDROID
+struct android_app;
+
+namespace GEO {
+    namespace CmdLine {
+	void GEOGRAM_API set_android_app(android_app* app);
+
+	android_app* GEOGRAM_API get_android_app();
+    }
+}
+
+#endif
+
+
 #endif
 
 

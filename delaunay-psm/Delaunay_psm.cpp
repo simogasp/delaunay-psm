@@ -3163,6 +3163,24 @@ namespace GEO {
     }
 }
 
+#ifdef GEO_OS_ANDROID
+namespace {
+    android_app* android_app_ = nullptr;
+}
+
+namespace GEO {
+    namespace CmdLine {
+	void set_android_app(android_app* app) {
+	    android_app_ = app;
+	}
+	
+	android_app* get_android_app() {
+	    return android_app_;
+	}
+    }
+}
+#endif
+
 
 /******* extracted from ../basic/command_line_args.cpp *******/
 
@@ -3768,6 +3786,7 @@ namespace {
             "gfx:GLSL_tesselation", true, "use tesselation shaders if available"
         );
 	declare_arg("gfx:geometry", "1024x1024", "resolution");
+	declare_arg("gfx:keypress", "", "initial key sequence sent to viewer");
     }
     
     void import_arg_group_biblio() {
@@ -3777,6 +3796,18 @@ namespace {
 	    "biblio:command_line", false,
 	    "dump all command line arguments in biblio. report"
 	);
+    }
+
+    void import_arg_group_gui() {
+        declare_arg_group("gui", "gui options", ARG_ADVANCED);
+	declare_arg("gui:state", "", "gui layout state");
+	declare_arg("gui:style", "Dark", "gui style, one of Dark,Light");
+#ifdef GEO_OS_ANDROID
+	declare_arg("gui:font_size", 56, "font size");	
+#else	
+	declare_arg("gui:font_size", 18, "font size");
+#endif	
+	declare_arg("gui:expert", false, "expert mode for developpers");
     }
     
     
@@ -3894,7 +3925,9 @@ namespace GEO {
                 import_arg_group_poly();
             } else if(name == "gfx") {
                 import_arg_group_gfx();
-            } else {
+            } else if(name == "gui") {
+		import_arg_group_gui();
+	    } else {
                 Logger::instance()->set_quiet(false);
                 Logger::err("CmdLine")
                     << "No such option group: " << name
@@ -24970,7 +25003,9 @@ namespace GEO {
 		signed_index_t v3 = cavity_.facet_vertex(f,2);
 		new_tet = new_tetrahedron(signed_index_t(v), v1, v2, v3);
 		set_tet_adjacent(new_tet, 0, t_neigh);
-		set_tet_adjacent(t_neigh, find_tet_adjacent(t_neigh,old_tet), new_tet);
+		set_tet_adjacent(
+		    t_neigh, find_tet_adjacent(t_neigh,old_tet), new_tet
+		);
 		cavity_.set_facet_tet(f, new_tet);
 	    }
 	
@@ -25727,7 +25762,9 @@ namespace GEO {
                      // convention as in CGAL).
                      const double* pv_bkp = pv[f];
                      pv[f] = p;
-                     Sign ori = PCK::orient_3d_inexact(pv[0], pv[1], pv[2], pv[3]);
+                     Sign ori = PCK::orient_3d_inexact(
+			 pv[0], pv[1], pv[2], pv[3]
+		     );
                      
                      //   If the orientation is not negative, then we cannot
                      // walk towards t_next, and examine the next candidate
