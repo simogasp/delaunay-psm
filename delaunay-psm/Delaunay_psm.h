@@ -5797,7 +5797,8 @@ namespace VBW {
     
     enum {
 	CONFLICT_MASK  = 32768, 
-	END_OF_LIST    = 32767, 
+	MARKED_MASK    = 16384, 	
+	END_OF_LIST    = 16383, 
 	VERTEX_AT_INFINITY = 0  
     };
 
@@ -5954,7 +5955,12 @@ namespace VBW {
 	void clip_by_plane(vec4 P);
 
 	void clip_by_plane(vec4 P, global_index_t j);
-	
+
+
+        void clip_by_plane_fast(vec4 P);
+
+        void clip_by_plane_fast(vec4 P, global_index_t j);      
+      
 	index_t nb_t() const {
 	    return nb_t_;
 	}
@@ -6116,8 +6122,10 @@ namespace VBW {
 	     vbw_assert(t < max_t());
 	     vbw_assert(le < 3);
 	     Triangle T = get_triangle(t);
-	     index_t v1 = index_t((le == 0)*T.j + (le == 1)*T.k + (le == 2)*T.i);
-	     index_t v2 = index_t((le == 0)*T.k + (le == 1)*T.i + (le == 2)*T.j);
+	     index_t v1 =
+		 index_t((le == 0)*T.j + (le == 1)*T.k + (le == 2)*T.i);
+	     index_t v2 =
+		 index_t((le == 0)*T.k + (le == 1)*T.i + (le == 2)*T.j);
 	     vbw_assert(vv2t(v1,v2) == t);
 	     vbw_assert(vv2t(v2,v1) != END_OF_LIST);
 	     return vv2t(v2,v1);
@@ -6285,6 +6293,10 @@ namespace VBW {
       
       protected:
 
+        void triangulate_conflict_zone(
+	   index_t lv, index_t conflict_head, index_t conflict_tail
+	);
+      
         void set_vertex_plane(index_t v, vec4 P) {
 	    vbw_assert(v < max_v());
 	    plane_eqn_[v] = P;
@@ -6335,7 +6347,7 @@ namespace VBW {
 
 #ifndef STANDALONE_CONVEX_CELL	
 	bool use_exact_predicates_;
-#endif	
+#endif
     };
 }
 
