@@ -19252,10 +19252,6 @@ inline int det_compare_4d_filter( const double* p0, const double* p1, const doub
 #include <emmintrin.h>
 #endif
 
-#ifdef __AVX2__
-#include <immintrin.h>
-#endif
-
 namespace {
 
     using namespace GEO;
@@ -19348,127 +19344,6 @@ namespace {
 #endif	
     }
 
-#ifdef __AVX2__
-
-    inline __m256d avx2_vecdet(__m256d A, __m256d B, __m256d C, __m256d D) {
-	__m256d AD = _mm256_mul_pd(A,D);
-	__m256d BC = _mm256_mul_pd(B,C);
-	return _mm256_sub_pd(AD,BC);
-    }
-
-    inline double avx2_det4x4(
-	__m256d C11,
-	__m256d C12,
-	__m256d C13,
-	__m256d C14
-    ) {
-	// We develop w.r.t. the first column and
-	// compute the 4 minors simultaneously.
-	
-	__m256d C41 = _mm256_permute4x64_pd(C11, _MM_SHUFFLE(2,1,0,3)); 
-	
-	__m256d C22 = _mm256_permute4x64_pd(C12, _MM_SHUFFLE(0,3,2,1)); 
-	__m256d C32 = _mm256_permute4x64_pd(C12, _MM_SHUFFLE(1,0,3,2)); 
-
-	__m256d C23 = _mm256_permute4x64_pd(C13, _MM_SHUFFLE(0,3,2,1)); 
-	__m256d C33 = _mm256_permute4x64_pd(C13, _MM_SHUFFLE(1,0,3,2)); 
-
-        __m256d C24 = _mm256_permute4x64_pd(C14, _MM_SHUFFLE(0,3,2,1)); 
-        __m256d C34 = _mm256_permute4x64_pd(C14, _MM_SHUFFLE(1,0,3,2)); 
-	
-	__m256d M1 = _mm256_mul_pd(C12,avx2_vecdet(C23,C24,C33,C34));	
-	__m256d M2 = _mm256_mul_pd(C22,avx2_vecdet(C13,C14,C33,C34));
-	__m256d M3 = _mm256_mul_pd(C32,avx2_vecdet(C13,C14,C23,C24));
-
-	// compute the 4 3x3 minors simulateously by
-	// assembling the 3*4 2x2 minors
-	__m256d M = _mm256_add_pd(_mm256_sub_pd(M1,M2),M3);
-
-	// multiply the 4 3x3 minors by the 4 coefficients of the
-	// first column (permutted so that a41 comes first).
-	M = _mm256_mul_pd(M, C41);
-
-	// Compute -m0 +m1 -m2 +m3
-	M = _mm256_permute4x64_pd(M, _MM_SHUFFLE(2,0,3,1)); 
-	__m128d M_a = _mm256_extractf128_pd(M, 0);
-	__m128d M_b = _mm256_extractf128_pd(M, 1);
-	__m128d Mab = _mm_sub_pd(M_a,M_b);
-	double m[2];
-	_mm_store_pd(m, Mab);
-	return m[0]+m[1];
-    }
-
-    inline int in_sphere_3d_filter_avx2(
-        const double* p, const double* q, 
-        const double* r, const double* s, const double* t
-    ) {
-
-	// Mask to load just three doubles from the points.
-	__m256i XYZonly = _mm256_set_epi64x(
-	    0,~__int64_t(0),~__int64_t(0),~__int64_t(0)
-	);
-	__m256d P = _mm256_maskload_pd(p, XYZonly);
-	__m256d Q = _mm256_maskload_pd(q, XYZonly);
-	__m256d R = _mm256_maskload_pd(r, XYZonly);
-	__m256d S = _mm256_maskload_pd(s, XYZonly);
-	__m256d T = _mm256_maskload_pd(t, XYZonly);	
-	
-	__m256d PT = _mm256_sub_pd(P,T);
-	__m256d QT = _mm256_sub_pd(Q,T);
-	__m256d RT = _mm256_sub_pd(R,T);
-	__m256d ST = _mm256_sub_pd(S,T);			
-
-	// Absolute values by masking sign bit.
-	__m256d sign_mask = _mm256_set1_pd(-0.);
-	__m256d absPT     = _mm256_andnot_pd(PT, sign_mask);
-	__m256d absQT     = _mm256_andnot_pd(QT, sign_mask);
-	__m256d absRT     = _mm256_andnot_pd(RT, sign_mask);
-	__m256d absST     = _mm256_andnot_pd(ST, sign_mask);	
-	__m256d maxXYZ    = _mm256_max_pd(
-	    _mm256_max_pd(absPT, absQT), _mm256_max_pd(absRT, absST)
-	);
-
-	// Separating maxX, maxY, maxZ in three different registers
-	__m128d maxX = _mm256_extractf128_pd(maxXYZ,0);
-	__m128d maxZ = _mm256_extractf128_pd(maxXYZ,1);
-	__m128d maxY = _mm_shuffle_pd(maxX, maxX, 1);
-	__m128d max_max = _mm_max_pd(maxX, _mm_max_pd(maxY, maxZ));
-
-	// Computing dynamic filter
-	__m128d eps     = _mm_set1_pd(1.2466136531027298e-13);
-	        eps     = _mm_mul_pd(eps, _mm_mul_pd(maxX, _mm_mul_pd(maxY, maxZ)));
-		eps     = _mm_mul_pd(eps, _mm_mul_pd(max_max, max_max));
-	
-	// Transpose [PT, QT, RT, ST] -> X,Y,Z (last column is 0, ignored)
-	__m256d tmp0 = _mm256_shuffle_pd(PT, QT, 0x0);		
-	__m256d tmp2 = _mm256_shuffle_pd(PT, QT, 0xF);		
-	__m256d tmp1 = _mm256_shuffle_pd(RT, ST, 0x0);		
-	__m256d tmp3 = _mm256_shuffle_pd(RT, ST, 0xF);		
-	__m256d X  = _mm256_permute2f128_pd(tmp0, tmp1, 0x20);
-	__m256d Y  = _mm256_permute2f128_pd(tmp2, tmp3, 0x20);
-	__m256d Z  = _mm256_permute2f128_pd(tmp0, tmp1, 0x31);
-
-	// Compute first column with squared lengths of vectors
-	__m256d X2 = _mm256_mul_pd(X,X);
-	__m256d Y2 = _mm256_mul_pd(Y,Y);
-	__m256d Z2 = _mm256_mul_pd(Z,Z);
-	__m256d L2 = _mm256_add_pd(_mm256_add_pd(X2,Y2),Z2);
-
-	double det = avx2_det4x4(L2,X,Y,Z);
-
-	double epsval;
-	_mm_store_pd1(&epsval, eps);
-	
-	// Note: inverted as compared to CGAL
-	//   CGAL: in_sphere_3d (called side_of_oriented_sphere())
-	//      positive side is outside the sphere.
-	//   PCK: in_sphere_3d : positive side is inside the sphere
-
-	return (det > epsval) * -1 + (det < -epsval);
-    }
-
-#endif
-    
     inline int in_sphere_3d_filter_optim(
         const double* p, const double* q, 
         const double* r, const double* s, const double* t
@@ -19678,10 +19553,10 @@ namespace {
         const expansion& l1 = expansion_sq_dist(p1, p0, dim);
         const expansion& l2 = expansion_sq_dist(p2, p0, dim);
 
-        const expansion& a10 = expansion_dot_at(p1, q0, p0, dim).scale_fast(2.0);
-        const expansion& a11 = expansion_dot_at(p1, q1, p0, dim).scale_fast(2.0);
-        const expansion& a20 = expansion_dot_at(p2, q0, p0, dim).scale_fast(2.0);
-        const expansion& a21 = expansion_dot_at(p2, q1, p0, dim).scale_fast(2.0);
+        const expansion& a10 = expansion_dot_at(p1,q0,p0, dim).scale_fast(2.0);
+        const expansion& a11 = expansion_dot_at(p1,q1,p0, dim).scale_fast(2.0);
+        const expansion& a20 = expansion_dot_at(p2,q0,p0, dim).scale_fast(2.0);
+        const expansion& a21 = expansion_dot_at(p2,q1,p0, dim).scale_fast(2.0);
 
         const expansion& Delta = expansion_diff(a11, a10);
 
@@ -19816,16 +19691,16 @@ namespace {
         const expansion& l2 = expansion_sq_dist(p2, p0, dim);
         const expansion& l3 = expansion_sq_dist(p3, p0, dim);
 
-        const expansion& a10 = expansion_dot_at(p1, q0, p0, dim).scale_fast(2.0);
-        const expansion& a11 = expansion_dot_at(p1, q1, p0, dim).scale_fast(2.0);
-        const expansion& a12 = expansion_dot_at(p1, q2, p0, dim).scale_fast(2.0);
-        const expansion& a20 = expansion_dot_at(p2, q0, p0, dim).scale_fast(2.0);
-        const expansion& a21 = expansion_dot_at(p2, q1, p0, dim).scale_fast(2.0);
-        const expansion& a22 = expansion_dot_at(p2, q2, p0, dim).scale_fast(2.0);
+        const expansion& a10 = expansion_dot_at(p1,q0,p0, dim).scale_fast(2.0);
+        const expansion& a11 = expansion_dot_at(p1,q1,p0, dim).scale_fast(2.0);
+        const expansion& a12 = expansion_dot_at(p1,q2,p0, dim).scale_fast(2.0);
+        const expansion& a20 = expansion_dot_at(p2,q0,p0, dim).scale_fast(2.0);
+        const expansion& a21 = expansion_dot_at(p2,q1,p0, dim).scale_fast(2.0);
+        const expansion& a22 = expansion_dot_at(p2,q2,p0, dim).scale_fast(2.0);
 
-        const expansion& a30 = expansion_dot_at(p3, q0, p0, dim).scale_fast(2.0);
-        const expansion& a31 = expansion_dot_at(p3, q1, p0, dim).scale_fast(2.0);
-        const expansion& a32 = expansion_dot_at(p3, q2, p0, dim).scale_fast(2.0);
+        const expansion& a30 = expansion_dot_at(p3,q0,p0, dim).scale_fast(2.0);
+        const expansion& a31 = expansion_dot_at(p3,q1,p0, dim).scale_fast(2.0);
+        const expansion& a32 = expansion_dot_at(p3,q2,p0, dim).scale_fast(2.0);
 
         // [ b00 b01 b02 ]           [  1   1   1  ]-1
         // [ b10 b11 b12 ] = Delta * [ a10 a11 a12 ]
@@ -20267,25 +20142,25 @@ namespace {
         const expansion& l3 = expansion_sq_dist(p3, p0, dim);
         const expansion& l4 = expansion_sq_dist(p4, p0, dim);
 
-        const expansion& a10 = expansion_dot_at(p1, q0, p0, dim).scale_fast(2.0);
-        const expansion& a11 = expansion_dot_at(p1, q1, p0, dim).scale_fast(2.0);
-        const expansion& a12 = expansion_dot_at(p1, q2, p0, dim).scale_fast(2.0);
-        const expansion& a13 = expansion_dot_at(p1, q3, p0, dim).scale_fast(2.0);
+        const expansion& a10 = expansion_dot_at(p1,q0,p0, dim).scale_fast(2.0);
+        const expansion& a11 = expansion_dot_at(p1,q1,p0, dim).scale_fast(2.0);
+        const expansion& a12 = expansion_dot_at(p1,q2,p0, dim).scale_fast(2.0);
+        const expansion& a13 = expansion_dot_at(p1,q3,p0, dim).scale_fast(2.0);
 
-        const expansion& a20 = expansion_dot_at(p2, q0, p0, dim).scale_fast(2.0);
-        const expansion& a21 = expansion_dot_at(p2, q1, p0, dim).scale_fast(2.0);
-        const expansion& a22 = expansion_dot_at(p2, q2, p0, dim).scale_fast(2.0);
-        const expansion& a23 = expansion_dot_at(p2, q3, p0, dim).scale_fast(2.0);
+        const expansion& a20 = expansion_dot_at(p2,q0,p0, dim).scale_fast(2.0);
+        const expansion& a21 = expansion_dot_at(p2,q1,p0, dim).scale_fast(2.0);
+        const expansion& a22 = expansion_dot_at(p2,q2,p0, dim).scale_fast(2.0);
+        const expansion& a23 = expansion_dot_at(p2,q3,p0, dim).scale_fast(2.0);
 
-        const expansion& a30 = expansion_dot_at(p3, q0, p0, dim).scale_fast(2.0);
-        const expansion& a31 = expansion_dot_at(p3, q1, p0, dim).scale_fast(2.0);
-        const expansion& a32 = expansion_dot_at(p3, q2, p0, dim).scale_fast(2.0);
-        const expansion& a33 = expansion_dot_at(p3, q3, p0, dim).scale_fast(2.0);
+        const expansion& a30 = expansion_dot_at(p3,q0,p0, dim).scale_fast(2.0);
+        const expansion& a31 = expansion_dot_at(p3,q1,p0, dim).scale_fast(2.0);
+        const expansion& a32 = expansion_dot_at(p3,q2,p0, dim).scale_fast(2.0);
+        const expansion& a33 = expansion_dot_at(p3,q3,p0, dim).scale_fast(2.0);
 
-        const expansion& a40 = expansion_dot_at(p4, q0, p0, dim).scale_fast(2.0);
-        const expansion& a41 = expansion_dot_at(p4, q1, p0, dim).scale_fast(2.0);
-        const expansion& a42 = expansion_dot_at(p4, q2, p0, dim).scale_fast(2.0);
-        const expansion& a43 = expansion_dot_at(p4, q3, p0, dim).scale_fast(2.0);
+        const expansion& a40 = expansion_dot_at(p4,q0,p0, dim).scale_fast(2.0);
+        const expansion& a41 = expansion_dot_at(p4,q1,p0, dim).scale_fast(2.0);
+        const expansion& a42 = expansion_dot_at(p4,q2,p0, dim).scale_fast(2.0);
+        const expansion& a43 = expansion_dot_at(p4,q3,p0, dim).scale_fast(2.0);
 
         // [ b00 b01 b02 b03 ]           [  1   1   1   1  ]-1
         // [ b10 b11 b12 b13 ]           [ a10 a11 a12 a13 ]
@@ -20621,19 +20496,25 @@ namespace {
                 } else if(p_sort[i] == p1) {
                     Sign Delta1_sign = Delta1.sign();
                     if(Delta1_sign != ZERO) {
-                        len_orient3dh_SOS = std::max(len_orient3dh_SOS, Delta1.length());
+                        len_orient3dh_SOS = std::max(
+			    len_orient3dh_SOS, Delta1.length()
+			 );
                         return Sign(Delta4_sign * Delta1_sign);
                     }
                 } else if(p_sort[i] == p2) {
                     Sign Delta2_sign = Delta2.sign();
                     if(Delta2_sign != ZERO) {
-                        len_orient3dh_SOS = std::max(len_orient3dh_SOS, Delta2.length());
+                        len_orient3dh_SOS = std::max(
+			    len_orient3dh_SOS, Delta2.length()
+			);
                         return Sign(-Delta4_sign * Delta2_sign);
                     }
                 } else if(p_sort[i] == p3) {
                     Sign Delta3_sign = Delta3.sign();
                     if(Delta3_sign != ZERO) {
-                        len_orient3dh_SOS = std::max(len_orient3dh_SOS, Delta3.length());
+                        len_orient3dh_SOS = std::max(
+			    len_orient3dh_SOS, Delta3.length()
+			);
                         return Sign(Delta4_sign * Delta3_sign);
                     }
                 } else if(p_sort[i] == p4) {
@@ -20931,7 +20812,8 @@ namespace GEO {
         }
 
         Sign side3_SOS(
-            const double* p0, const double* p1, const double* p2, const double* p3,
+            const double* p0, const double* p1,
+	    const double* p2, const double* p3,
             const double* q0, const double* q1, const double* q2,
             coord_index_t DIM
         ) {
@@ -20959,17 +20841,23 @@ namespace GEO {
             const double* q0, const double* q1, const double* q2,
 	    bool SOS
         ) {
-            Sign result = Sign(side3h_3d_filter(p0, p1, p2, p3, h0, h1, h2, h3, q0, q1, q2));
+            Sign result = Sign(
+		side3h_3d_filter(p0, p1, p2, p3, h0, h1, h2, h3, q0, q1, q2)
+	    );
             if(SOS && result == ZERO) {
-                result = side3h_exact_SOS(p0, p1, p2, p3, h0, h1, h2, h3, q0, q1, q2);
+                result = side3h_exact_SOS(
+		    p0, p1, p2, p3, h0, h1, h2, h3, q0, q1, q2
+		);
             }
             return result;
         }
         
         Sign side4_SOS(
             const double* p0,
-            const double* p1, const double* p2, const double* p3, const double* p4,
-            const double* q0, const double* q1, const double* q2, const double* q3,
+            const double* p1, const double* p2,
+	    const double* p3, const double* p4,
+            const double* q0, const double* q1,
+	    const double* q2, const double* q3,
             coord_index_t DIM
         ) {
             switch(DIM) {
@@ -20999,8 +20887,8 @@ namespace GEO {
 
 
         Sign side4_3d(
-            const double* p0, const double* p1, const double* p2, const double* p3,
-            const double* p4
+            const double* p0, const double* p1, const double* p2,
+	    const double* p3, const double* p4
         ) {
             cnt_side4_total++;
             Sign result = Sign(side4_3d_filter(p0, p1, p2, p3, p4));
@@ -21047,11 +20935,8 @@ namespace GEO {
             
             // This specialized filter supposes that orient_3d(p0,p1,p2,p3) > 0
 
-#ifdef __AVX2__
-	    Sign result = Sign(in_sphere_3d_filter_avx2(p0, p1, p2, p3, p4));
-#else	    
             Sign result = Sign(in_sphere_3d_filter_optim(p0, p1, p2, p3, p4));
-#endif	    
+
             if(result == 0) {
                 result = side4_3d_exact_SOS(p0, p1, p2, p3, p4);
             }
@@ -21113,7 +20998,9 @@ namespace GEO {
             // Both predicates are equivalent through duality
             // (see comment in in_circle_3d_SOS(), the same
             //  remark applies).
-            return Sign(-side3_3dlifted_SOS(p0,p1,p2,p3,h0,h1,h2,h3,p0,p1,p2,SOS));
+            return Sign(
+		-side3_3dlifted_SOS(p0,p1,p2,p3,h0,h1,h2,h3,p0,p1,p2,SOS)
+	    );
         }
 
         
@@ -21220,7 +21107,8 @@ namespace GEO {
 
 
 	Sign det_4d(
-	    const double* p0, const double* p1, const double* p2, const double* p3
+	    const double* p0, const double* p1,
+	    const double* p2, const double* p3
 	) {
 	    Sign result = Sign(
 		det_4d_filter(p0, p1, p2, p3)
@@ -21245,7 +21133,7 @@ namespace GEO {
 		const expansion& p3_0 = expansion_create(p3[0]);
 		const expansion& p3_1 = expansion_create(p3[1]);
 		const expansion& p3_2 = expansion_create(p3[2]);
-		const expansion& p3_3 = expansion_create(p3[3]);			
+		const expansion& p3_3 = expansion_create(p3[3]);	
 
 		result = sign_of_expansion_determinant(
 		    p0_0, p0_1, p0_2, p0_3,
@@ -21285,8 +21173,8 @@ namespace GEO {
 		const expansion& a3_0 = expansion_diff(p4[0],p3[0]);
 		const expansion& a3_1 = expansion_diff(p4[1],p3[1]);
 		const expansion& a3_2 = expansion_diff(p4[2],p3[2]);
-		const expansion& a3_3 = expansion_diff(p4[3],p3[3]);			
-
+		const expansion& a3_3 = expansion_diff(p4[3],p3[3]);
+		
 		result = sign_of_expansion_determinant(
 		    p0_0, p0_1, p0_2, p0_3,
 		    p1_0, p1_1, p1_2, p1_3,
@@ -21426,409 +21314,6 @@ namespace GEO {
         }
     }
 }
-
-
-/******* extracted from delaunay_2d.h *******/
-
-#ifndef GEOGRAM_DELAUNAY_DELAUNAY_2D
-#define GEOGRAM_DELAUNAY_DELAUNAY_2D
-
-
-#include <stack>
-
-
-namespace GEO {
-
-    class GEOGRAM_API Delaunay2d : public Delaunay {
-    public:
-        Delaunay2d(coord_index_t dimension = 2);
-
-        virtual void set_vertices(
-            index_t nb_vertices, const double* vertices
-        );
-
-        virtual index_t nearest_vertex(const double* p) const;
-
-
-    protected:
-
-        static const index_t NO_TRIANGLE = index_t(-1);
-
-        bool create_first_triangle(
-            index_t& iv0, index_t& iv1, index_t& iv2
-        );
-
-         index_t locate(
-            const double* p, index_t hint = NO_TRIANGLE,
-            bool thread_safe = false,
-            Sign* orient = nullptr
-         ) const;
-         
-         index_t locate_inexact(
-             const double* p, index_t hint, index_t max_iter
-         ) const;
-
-         index_t insert(index_t v, index_t hint = NO_TRIANGLE);
-
-         void find_conflict_zone(
-             index_t v, 
-             index_t t, const Sign* orient,
-             index_t& t_bndry, index_t& e_bndry,
-             index_t& first, index_t& last
-         );
-         
-         void find_conflict_zone_iterative(
-             const double* p, index_t t,
-             index_t& t_bndry, index_t& e_bndry,
-             index_t& first, index_t& last
-         );
-
-         
-         index_t stellate_conflict_zone(
-             index_t v, 
-             index_t t_bndry, index_t e_bndry
-         );
-         
-         // _________ Combinatorics - new and delete _________________________
-
-        index_t max_t() const {
-            return cell_to_v_store_.size() / 3;
-        }
-
-
-        static const index_t NOT_IN_LIST  = index_t(~0);
-
-        static const index_t NOT_IN_LIST_BIT = index_t(1u << 31);
-
-        static const index_t END_OF_LIST = ~(NOT_IN_LIST_BIT);
-
-
-        bool triangle_is_in_list(index_t t) const {
-            geo_debug_assert(t < max_t());
-            return (cell_next_[t] & NOT_IN_LIST_BIT) == 0;
-        }
-
-        index_t triangle_next(index_t t) const {
-            geo_debug_assert(t < max_t());
-            geo_debug_assert(triangle_is_in_list(t));
-            return cell_next_[t];
-        }
-
-        void add_triangle_to_list(index_t t, index_t& first, index_t& last) {
-            geo_debug_assert(t < max_t());
-            geo_debug_assert(!triangle_is_in_list(t));
-            if(last == END_OF_LIST) {
-                geo_debug_assert(first == END_OF_LIST);
-                first = last = t;
-                cell_next_[t] = END_OF_LIST;
-            } else {
-                cell_next_[t] = first;
-                first = t;
-            }
-        }
-
-        void remove_triangle_from_list(index_t t) {
-            geo_debug_assert(t < max_t());
-            geo_debug_assert(triangle_is_in_list(t));
-            cell_next_[t] = NOT_IN_LIST;
-        }
-
-        static const signed_index_t VERTEX_AT_INFINITY = -1;
-
-        bool triangle_is_finite(index_t t) const {
-            return 
-                cell_to_v_store_[3 * t]     >= 0 &&
-                cell_to_v_store_[3 * t + 1] >= 0 &&
-                cell_to_v_store_[3 * t + 2] >= 0 ;
-        }
-        
-        bool triangle_is_real(index_t t) const {
-            return !triangle_is_free(t) && triangle_is_finite(t);
-        }
-
-        bool triangle_is_virtual(index_t t) const {
-            return
-            !triangle_is_free(t) && (
-		cell_to_v_store_[3 * t] == VERTEX_AT_INFINITY ||
-		cell_to_v_store_[3 * t + 1] == VERTEX_AT_INFINITY ||
-		cell_to_v_store_[3 * t + 2] == VERTEX_AT_INFINITY
-	    );
-        }
-
-        bool triangle_is_free(index_t t) const {
-            return triangle_is_in_list(t);
-        }
-
-        index_t new_triangle() {
-            index_t result;
-            if(first_free_ == END_OF_LIST) {
-                cell_to_v_store_.resize(cell_to_v_store_.size() + 3, -1);
-                cell_to_cell_store_.resize(cell_to_cell_store_.size() + 3, -1);
-                // index_t(NOT_IN_LIST) is necessary, else with
-                // NOT_IN_LIST alone the compiler tries to generate a
-                // reference to NOT_IN_LIST resulting in a link error.
-                cell_next_.push_back(index_t(NOT_IN_LIST));
-                result = max_t() - 1;
-            } else {
-                result = first_free_;
-                first_free_ = triangle_next(first_free_);
-                remove_triangle_from_list(result);
-            }
-
-            cell_to_cell_store_[3 * result] = -1;
-            cell_to_cell_store_[3 * result + 1] = -1;
-            cell_to_cell_store_[3 * result + 2] = -1;
-
-            return result;
-        }
-
-        index_t new_triangle(
-            signed_index_t v1, signed_index_t v2, 
-            signed_index_t v3
-        ) {
-            index_t result = new_triangle();
-            cell_to_v_store_[3 * result] = v1;
-            cell_to_v_store_[3 * result + 1] = v2;
-            cell_to_v_store_[3 * result + 2] = v3;
-            return result;
-        }
-
-        void set_triangle_mark_stamp(index_t stamp) {
-            cur_stamp_ = (stamp | NOT_IN_LIST_BIT);
-        }
-
-        bool triangle_is_marked(index_t t) const {
-            return cell_next_[t] == cur_stamp_;
-        }
-
-        void mark_triangle(index_t t) {
-            cell_next_[t] = cur_stamp_;
-        }
-
-        // _________ Combinatorics ___________________________________
-
-        static index_t triangle_edge_vertex(index_t e, index_t v) {
-            geo_debug_assert(e < 3);
-            geo_debug_assert(v < 2);
-            return index_t(triangle_edge_vertex_[e][v]);
-        }
-
-        signed_index_t triangle_vertex(index_t t, index_t lv) const {
-            geo_debug_assert(t < max_t());
-            geo_debug_assert(lv < 3);
-            return cell_to_v_store_[3 * t + lv];
-        }
-
-        index_t find_triangle_vertex(index_t t, signed_index_t v) const {
-            geo_debug_assert(t < max_t());
-            //   Find local index of v in triangle t vertices.
-            const signed_index_t* T = &(cell_to_v_store_[3 * t]);
-            return find_3(T,v);
-        }
-
-
-         index_t finite_triangle_vertex(index_t t, index_t lv) const {
-            geo_debug_assert(t < max_t());
-            geo_debug_assert(lv < 3);
-            geo_debug_assert(cell_to_v_store_[3 * t + lv] != -1);
-            return index_t(cell_to_v_store_[3 * t + lv]);
-        }
-
-        void set_triangle_vertex(index_t t, index_t lv, signed_index_t v) {
-            geo_debug_assert(t < max_t());
-            geo_debug_assert(lv < 3);
-            cell_to_v_store_[3 * t + lv] = v;
-        }
-
-        signed_index_t triangle_adjacent(index_t t, index_t le) const {
-            geo_debug_assert(t < max_t());
-            geo_debug_assert(le < 3);
-            signed_index_t result = cell_to_cell_store_[3 * t + le];
-            return result;
-        }
-
-        void set_triangle_adjacent(index_t t1, index_t le1, index_t t2) {
-            geo_debug_assert(t1 < max_t());
-            geo_debug_assert(t2 < max_t());
-            geo_debug_assert(le1 < 3);
-	    geo_debug_assert(t1 != t2);
-            cell_to_cell_store_[3 * t1 + le1] = signed_index_t(t2);
-        }
-        
-        index_t find_triangle_adjacent(
-            index_t t1, index_t t2_in
-        ) const {
-            geo_debug_assert(t1 < max_t());
-            geo_debug_assert(t2_in < max_t());
-            geo_debug_assert(t1 != t2_in);
-
-            signed_index_t t2 = signed_index_t(t2_in);
-
-            // Find local index of t2 in triangle t1 adajcent tets.
-            const signed_index_t* T = &(cell_to_cell_store_[3 * t1]);
-            index_t result = find_3(T,t2);
-
-            // Sanity check: make sure that t1 is adjacent to t2
-            // only once!
-            geo_debug_assert(triangle_adjacent(t1,(result+1)%3) != t2);
-            geo_debug_assert(triangle_adjacent(t1,(result+2)%3) != t2);
-            return result;
-        }
-
-
-
-        void set_tet(
-            index_t t,
-            signed_index_t v0, signed_index_t v1,
-            signed_index_t v2, 
-            index_t a0, index_t a1, index_t a2
-        ) {
-            geo_debug_assert(t < max_t());
-            cell_to_v_store_[3 * t] = v0;
-            cell_to_v_store_[3 * t + 1] = v1;
-            cell_to_v_store_[3 * t + 2] = v2;
-            cell_to_cell_store_[3 * t] = signed_index_t(a0);
-            cell_to_cell_store_[3 * t + 1] = signed_index_t(a1);
-            cell_to_cell_store_[3 * t + 2] = signed_index_t(a2);
-        }
-
-        // _________ Predicates _____________________________________________
-
-        bool triangle_is_conflict(index_t t, const double* p) const {
-
-            // Lookup triangle vertices
-            const double* pv[3];
-            for(index_t i=0; i<3; ++i) {
-                signed_index_t v = triangle_vertex(t,i);
-                pv[i] = (v == -1) ? nullptr : vertex_ptr(index_t(v));
-            }
-
-            // Check for virtual triangles (then in_circle()
-            // is replaced with orient2d())
-            for(index_t le = 0; le < 3; ++le) {
-
-                if(pv[le] == nullptr) {
-
-                    // Facet of a virtual triangle opposite to
-                    // infinite vertex corresponds to
-                    // the triangle on the convex hull of the points.
-                    // Orientation is obtained by replacing vertex lf
-                    // with p.
-                    pv[le] = p;
-                    Sign sign = PCK::orient_2d(pv[0],pv[1],pv[2]);
-
-                    if(sign > 0) {
-                        return true;
-                    }
-
-                    if(sign < 0) {
-                        return false;
-                    }
-
-                    // If sign is zero, we check the real triangle
-                    // adjacent to the facet on the convex hull.
-                    geo_debug_assert(triangle_adjacent(t, le) >= 0);
-                    index_t t2 = index_t(triangle_adjacent(t, le));
-                    geo_debug_assert(!triangle_is_virtual(t2));
-
-                    //  If t2 is already chained in the conflict list,
-                    // then it is conflict
-                    if(triangle_is_in_list(t2)) {
-                        return true;
-                    }
-
-                    //  If t2 is marked, then it is not in conflict.
-                    if(triangle_is_marked(t2)) {
-                        return false;
-                    }
-
-                    return triangle_is_conflict(t2, p);
-                }
-            }
-
-            //   If the triangle is a finite one, it is in conflict
-            // if its circumscribed sphere contains the point (this is
-            // the standard case).
-
-            if(weighted_) {
-                double h0 = heights_[finite_triangle_vertex(t, 0)];
-                double h1 = heights_[finite_triangle_vertex(t, 1)];
-                double h2 = heights_[finite_triangle_vertex(t, 2)];
-                index_t pindex = index_t(
-                    (p - vertex_ptr(0)) / int(vertex_stride_)
-                );
-                double h = heights_[pindex];
-                return (PCK::orient_2dlifted_SOS(
-                            pv[0],pv[1],pv[2],p,h0,h1,h2,h
-                       ) > 0) ;
-            }
-
-            return (PCK::in_circle_2d_SOS(pv[0], pv[1], pv[2], p) > 0);
-        }
-
-    protected:
-
-        static index_t find_3(const signed_index_t* T, signed_index_t v) {
-            // The following expression is 10% faster than using
-            // if() statements. This uses the C++ norm, that 
-            // ensures that the 'true' boolean value converted to 
-            // an int is always 1. With most compilers, this avoids 
-            // generating branching instructions.
-            // Thank to Laurent Alonso for this idea.
-            index_t result = index_t( (T[1] == v) | ((T[2] == v) * 2) );
-            // Sanity check, important if it was T[0], not explicitly
-            // tested (detects input that does not meet the precondition).
-            geo_debug_assert(T[result] == v);
-            return result; 
-        }
-
-        virtual ~Delaunay2d();
-
-        void show_triangle(index_t t) const;
-
-        void show_triangle_adjacent(index_t t, index_t le) const;
-
-        void show_list(
-            index_t first, const std::string& list_name
-        ) const;
-
-        void check_combinatorics(bool verbose = false) const;
-
-        void check_geometry(bool verbose = false) const;
-
-    private:
-        vector<signed_index_t> cell_to_v_store_;
-        vector<signed_index_t> cell_to_cell_store_;
-        vector<index_t> cell_next_;
-        vector<index_t> reorder_;
-        index_t cur_stamp_; // used for marking
-        index_t first_free_;
-        bool weighted_;
-        vector<double> heights_; // only used in weighted mode
-
-         bool debug_mode_;
-
-         bool verbose_debug_mode_;
-
-         bool benchmark_mode_;
-
-	 static char triangle_edge_vertex_[3][2];
-
-	 std::stack<index_t> S_;
-    };
-
-    
-
-    class GEOGRAM_API RegularWeightedDelaunay2d : public Delaunay2d {
-    public:
-        RegularWeightedDelaunay2d(coord_index_t dimension = 3);
-
-    protected:
-        virtual ~RegularWeightedDelaunay2d();
-    };
-}
-
-#endif
 
 
 /******* extracted from cavity.h *******/
@@ -27698,7 +27183,7 @@ namespace GEO {
 
 namespace {
     using namespace VBW;
-    
+
     class SmallStack_ushort {
     public:
 
@@ -27947,7 +27432,8 @@ namespace VBW {
 	    if(borders_only &&
 	       has_vglobal() &&
 	       v_global_index(v) != global_index_t(-1) &&
-	       v_global_index(v) != global_index_t(-2) // This one for fluid free bndry
+	       v_global_index(v) != global_index_t(-2)
+                // inde_t(-2) is for fluid free bndry
 	    ) {
 		continue;
 	    }
@@ -27966,6 +27452,21 @@ namespace VBW {
 	return nt;
     }
 
+    void ConvexCell::for_each_Voronoi_vertex(
+	index_t v,
+	std::function<void(index_t)> vertex
+    ) {
+	geo_debug_assert(!geometry_dirty_);
+	if(v2t_[v] != END_OF_LIST) {
+	    index_t t = index_t(v2t_[v]);
+	    do {
+		vertex(t);
+		index_t lv = triangle_find_vertex(t,v);		   
+		t = triangle_adjacent(t, (lv + 1)%3);
+	    } while(t != v2t_[v]);
+	}
+    }
+    
 #if !defined(STANDALONE_CONVEX_CELL) && !defined(GEOGRAM_PSM)
     
     void ConvexCell::append_to_mesh(
@@ -28013,7 +27514,8 @@ namespace VBW {
 	    if(borders_only &&
 	       has_vglobal() &&
 	       v_global_index(v) != global_index_t(-1) &&
-	       v_global_index(v) != global_index_t(-2) // This one for fluid free bndry
+	       v_global_index(v) != global_index_t(-2) // This one for
+	                                               // fluid free bndry
 	    ) {
 		continue;
 	    }
@@ -28088,6 +27590,9 @@ namespace VBW {
 	//   - the code is simpler.
 	//   - and more importantly, we got no more than a few tenths of
 	//     vertices.
+	// The 'climbing from a random triangle' strategy is implemented
+	// in clip_by_plane_fast(). We keep both implementations for now,
+	// until we make sure than one is more efficient than the other one.
 
         index_t t = first_valid_;
         first_valid_ = END_OF_LIST;
@@ -28111,6 +27616,81 @@ namespace VBW {
 	triangulate_conflict_zone(lv, conflict_head, conflict_tail);
     }
 
+    // This version of clip_by_plane(), with a user-defined predicate,
+    // is duplicated from the standard version above. May be fixed by
+    // moving it to the header file (to have faster invokation of the
+    // predicate) and make the default version call it with PCK, but
+    // I do not want to do that because:
+    //    - will make the header more heavy, longer compilation time
+    //    - not sure about the impact on performance
+    //    - the function is short, not a big drama to duplicate it...
+    void ConvexCell::clip_by_plane(
+	vec4 eqn, index_t global_index,
+	std::function<bool(ushort,ushort)> triangle_conflict_predicate
+    ) {
+	geometry_dirty_ = true;
+
+	index_t lv = nb_v_;	
+	if(lv == max_v()) {
+	    grow_v();
+	}
+	plane_eqn_[lv] = eqn;
+	vbw_assert(lv < max_v());
+	++nb_v_;
+
+	// Note: it is unlikely that this function is used without
+	// global indices (because without global indices, it would
+	// mean we are only using geometry, then we should use the
+	// default predicate), so we could probably make it mandatory
+	// to have global indices here.
+	if(has_vglobal_) {
+	    vglobal_[nb_v()-1] = global_index;
+	}
+
+	
+	// Step 1: Find conflict zone and link conflicted triangles
+	// (to recycle them in free list).
+
+	index_t conflict_head = END_OF_LIST;
+	index_t conflict_tail = END_OF_LIST;
+
+        // Classify triangles, compute conflict list and valid list.
+	// Note: This could be done by climbing from a random triangle,
+	// but here we prefer complete linear scan for several reasons:
+	//   - it is more robust to numerical errors (here we are not
+	//     using exact predicates).
+	//   - the code is simpler.
+	//   - and more importantly, we got no more than a few tenths of
+	//     vertices.
+	// The 'climbing from a random triangle' strategy is implemented
+	// in clip_by_plane_fast(). We keep both implementations for now,
+	// until we make sure than one is more efficient than the other one
+	// (and clip_by_plane_fast() does not have a version with the user-
+	// defined predicate for now).
+
+        index_t t = first_valid_;
+        first_valid_ = END_OF_LIST;
+        while(t != END_OF_LIST) { 
+	    TriangleWithFlags T = get_triangle_and_flags(t);
+	    if(triangle_conflict_predicate(ushort(t), ushort(nb_v()-1))) {
+		set_triangle_flags(
+		    t, ushort(conflict_head) | ushort(CONFLICT_MASK)
+		);
+		conflict_head = t;
+		if(conflict_tail == END_OF_LIST) {
+		    conflict_tail = t;
+		}
+	    } else {
+		set_triangle_flags(t, ushort(first_valid_));
+		first_valid_ = t;
+	    }
+	    t = index_t(T.flags);
+	}
+	
+	triangulate_conflict_zone(lv, conflict_head, conflict_tail);
+    }
+
+    
     void ConvexCell::clip_by_plane_fast(vec4 P, global_index_t j) {
 	vbw_assert(has_vglobal_);
 	clip_by_plane_fast(P);
@@ -28477,6 +28057,7 @@ namespace VBW {
 	}
 	
         // Get the plane equations associated with each vertex of t
+
 	vec4 pi1 = vertex_plane(T.i);
 	vec4 pi2 = vertex_plane(T.j);
 	vec4 pi3 = vertex_plane(T.k);
@@ -31848,7 +31429,7 @@ namespace GEO {
 	    
 	// Determine the periodic instances of the vertex to be created
 	// ************************************************************
-	//   - Find all the inresected boundary faces
+	//   - Find all the intersected boundary faces
 	//   - The instances to create correspond to all the possible
 	//     sums of translation vectors associated with the
 	//     intersected boundary faces

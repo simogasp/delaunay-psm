@@ -5951,12 +5951,22 @@ namespace VBW {
 	) const;
 
 #endif      
+
+        void for_each_Voronoi_vertex(
+	    index_t v,
+	    std::function<void(index_t)> vertex
+        );
       
 	void clip_by_plane(vec4 P);
 
 	void clip_by_plane(vec4 P, global_index_t j);
 
 
+        void clip_by_plane(
+	    vec4 P, global_index_t P_global_index,
+	    std::function<bool(ushort,ushort)> triangle_conflict_predicate
+	);
+      
         void clip_by_plane_fast(vec4 P);
 
         void clip_by_plane_fast(vec4 P, global_index_t j);      
@@ -6683,6 +6693,409 @@ namespace GEO {
 
 #define geo_register_Delaunay_creator(type, name) \
     geo_register_creator(GEO::DelaunayFactory, type, name)
+}
+
+#endif
+
+
+/******* extracted from delaunay_2d.h *******/
+
+#ifndef GEOGRAM_DELAUNAY_DELAUNAY_2D
+#define GEOGRAM_DELAUNAY_DELAUNAY_2D
+
+
+#include <stack>
+
+
+namespace GEO {
+
+    class GEOGRAM_API Delaunay2d : public Delaunay {
+    public:
+        Delaunay2d(coord_index_t dimension = 2);
+
+        virtual void set_vertices(
+            index_t nb_vertices, const double* vertices
+        );
+
+        virtual index_t nearest_vertex(const double* p) const;
+
+
+    protected:
+
+        static const index_t NO_TRIANGLE = index_t(-1);
+
+        bool create_first_triangle(
+            index_t& iv0, index_t& iv1, index_t& iv2
+        );
+
+         index_t locate(
+            const double* p, index_t hint = NO_TRIANGLE,
+            bool thread_safe = false,
+            Sign* orient = nullptr
+         ) const;
+         
+         index_t locate_inexact(
+             const double* p, index_t hint, index_t max_iter
+         ) const;
+
+         index_t insert(index_t v, index_t hint = NO_TRIANGLE);
+
+         void find_conflict_zone(
+             index_t v, 
+             index_t t, const Sign* orient,
+             index_t& t_bndry, index_t& e_bndry,
+             index_t& first, index_t& last
+         );
+         
+         void find_conflict_zone_iterative(
+             const double* p, index_t t,
+             index_t& t_bndry, index_t& e_bndry,
+             index_t& first, index_t& last
+         );
+
+         
+         index_t stellate_conflict_zone(
+             index_t v, 
+             index_t t_bndry, index_t e_bndry
+         );
+         
+         // _________ Combinatorics - new and delete _________________________
+
+        index_t max_t() const {
+            return cell_to_v_store_.size() / 3;
+        }
+
+
+        static const index_t NOT_IN_LIST  = index_t(~0);
+
+        static const index_t NOT_IN_LIST_BIT = index_t(1u << 31);
+
+        static const index_t END_OF_LIST = ~(NOT_IN_LIST_BIT);
+
+
+        bool triangle_is_in_list(index_t t) const {
+            geo_debug_assert(t < max_t());
+            return (cell_next_[t] & NOT_IN_LIST_BIT) == 0;
+        }
+
+        index_t triangle_next(index_t t) const {
+            geo_debug_assert(t < max_t());
+            geo_debug_assert(triangle_is_in_list(t));
+            return cell_next_[t];
+        }
+
+        void add_triangle_to_list(index_t t, index_t& first, index_t& last) {
+            geo_debug_assert(t < max_t());
+            geo_debug_assert(!triangle_is_in_list(t));
+            if(last == END_OF_LIST) {
+                geo_debug_assert(first == END_OF_LIST);
+                first = last = t;
+                cell_next_[t] = END_OF_LIST;
+            } else {
+                cell_next_[t] = first;
+                first = t;
+            }
+        }
+
+        void remove_triangle_from_list(index_t t) {
+            geo_debug_assert(t < max_t());
+            geo_debug_assert(triangle_is_in_list(t));
+            cell_next_[t] = NOT_IN_LIST;
+        }
+
+        static const signed_index_t VERTEX_AT_INFINITY = -1;
+
+        bool triangle_is_finite(index_t t) const {
+            return 
+                cell_to_v_store_[3 * t]     >= 0 &&
+                cell_to_v_store_[3 * t + 1] >= 0 &&
+                cell_to_v_store_[3 * t + 2] >= 0 ;
+        }
+        
+        bool triangle_is_real(index_t t) const {
+            return !triangle_is_free(t) && triangle_is_finite(t);
+        }
+
+        bool triangle_is_virtual(index_t t) const {
+            return
+            !triangle_is_free(t) && (
+		cell_to_v_store_[3 * t] == VERTEX_AT_INFINITY ||
+		cell_to_v_store_[3 * t + 1] == VERTEX_AT_INFINITY ||
+		cell_to_v_store_[3 * t + 2] == VERTEX_AT_INFINITY
+	    );
+        }
+
+        bool triangle_is_free(index_t t) const {
+            return triangle_is_in_list(t);
+        }
+
+        index_t new_triangle() {
+            index_t result;
+            if(first_free_ == END_OF_LIST) {
+                cell_to_v_store_.resize(cell_to_v_store_.size() + 3, -1);
+                cell_to_cell_store_.resize(cell_to_cell_store_.size() + 3, -1);
+                // index_t(NOT_IN_LIST) is necessary, else with
+                // NOT_IN_LIST alone the compiler tries to generate a
+                // reference to NOT_IN_LIST resulting in a link error.
+                cell_next_.push_back(index_t(NOT_IN_LIST));
+                result = max_t() - 1;
+            } else {
+                result = first_free_;
+                first_free_ = triangle_next(first_free_);
+                remove_triangle_from_list(result);
+            }
+
+            cell_to_cell_store_[3 * result] = -1;
+            cell_to_cell_store_[3 * result + 1] = -1;
+            cell_to_cell_store_[3 * result + 2] = -1;
+
+            return result;
+        }
+
+        index_t new_triangle(
+            signed_index_t v1, signed_index_t v2, 
+            signed_index_t v3
+        ) {
+            index_t result = new_triangle();
+            cell_to_v_store_[3 * result] = v1;
+            cell_to_v_store_[3 * result + 1] = v2;
+            cell_to_v_store_[3 * result + 2] = v3;
+            return result;
+        }
+
+        void set_triangle_mark_stamp(index_t stamp) {
+            cur_stamp_ = (stamp | NOT_IN_LIST_BIT);
+        }
+
+        bool triangle_is_marked(index_t t) const {
+            return cell_next_[t] == cur_stamp_;
+        }
+
+        void mark_triangle(index_t t) {
+            cell_next_[t] = cur_stamp_;
+        }
+
+        // _________ Combinatorics ___________________________________
+
+        static index_t triangle_edge_vertex(index_t e, index_t v) {
+            geo_debug_assert(e < 3);
+            geo_debug_assert(v < 2);
+            return index_t(triangle_edge_vertex_[e][v]);
+        }
+
+        signed_index_t triangle_vertex(index_t t, index_t lv) const {
+            geo_debug_assert(t < max_t());
+            geo_debug_assert(lv < 3);
+            return cell_to_v_store_[3 * t + lv];
+        }
+
+        index_t find_triangle_vertex(index_t t, signed_index_t v) const {
+            geo_debug_assert(t < max_t());
+            //   Find local index of v in triangle t vertices.
+            const signed_index_t* T = &(cell_to_v_store_[3 * t]);
+            return find_3(T,v);
+        }
+
+
+         index_t finite_triangle_vertex(index_t t, index_t lv) const {
+            geo_debug_assert(t < max_t());
+            geo_debug_assert(lv < 3);
+            geo_debug_assert(cell_to_v_store_[3 * t + lv] != -1);
+            return index_t(cell_to_v_store_[3 * t + lv]);
+        }
+
+        void set_triangle_vertex(index_t t, index_t lv, signed_index_t v) {
+            geo_debug_assert(t < max_t());
+            geo_debug_assert(lv < 3);
+            cell_to_v_store_[3 * t + lv] = v;
+        }
+
+        signed_index_t triangle_adjacent(index_t t, index_t le) const {
+            geo_debug_assert(t < max_t());
+            geo_debug_assert(le < 3);
+            signed_index_t result = cell_to_cell_store_[3 * t + le];
+            return result;
+        }
+
+        void set_triangle_adjacent(index_t t1, index_t le1, index_t t2) {
+            geo_debug_assert(t1 < max_t());
+            geo_debug_assert(t2 < max_t());
+            geo_debug_assert(le1 < 3);
+	    geo_debug_assert(t1 != t2);
+            cell_to_cell_store_[3 * t1 + le1] = signed_index_t(t2);
+        }
+        
+        index_t find_triangle_adjacent(
+            index_t t1, index_t t2_in
+        ) const {
+            geo_debug_assert(t1 < max_t());
+            geo_debug_assert(t2_in < max_t());
+            geo_debug_assert(t1 != t2_in);
+
+            signed_index_t t2 = signed_index_t(t2_in);
+
+            // Find local index of t2 in triangle t1 adajcent tets.
+            const signed_index_t* T = &(cell_to_cell_store_[3 * t1]);
+            index_t result = find_3(T,t2);
+
+            // Sanity check: make sure that t1 is adjacent to t2
+            // only once!
+            geo_debug_assert(triangle_adjacent(t1,(result+1)%3) != t2);
+            geo_debug_assert(triangle_adjacent(t1,(result+2)%3) != t2);
+            return result;
+        }
+
+
+
+        void set_tet(
+            index_t t,
+            signed_index_t v0, signed_index_t v1,
+            signed_index_t v2, 
+            index_t a0, index_t a1, index_t a2
+        ) {
+            geo_debug_assert(t < max_t());
+            cell_to_v_store_[3 * t] = v0;
+            cell_to_v_store_[3 * t + 1] = v1;
+            cell_to_v_store_[3 * t + 2] = v2;
+            cell_to_cell_store_[3 * t] = signed_index_t(a0);
+            cell_to_cell_store_[3 * t + 1] = signed_index_t(a1);
+            cell_to_cell_store_[3 * t + 2] = signed_index_t(a2);
+        }
+
+        // _________ Predicates _____________________________________________
+
+        bool triangle_is_conflict(index_t t, const double* p) const {
+
+            // Lookup triangle vertices
+            const double* pv[3];
+            for(index_t i=0; i<3; ++i) {
+                signed_index_t v = triangle_vertex(t,i);
+                pv[i] = (v == -1) ? nullptr : vertex_ptr(index_t(v));
+            }
+
+            // Check for virtual triangles (then in_circle()
+            // is replaced with orient2d())
+            for(index_t le = 0; le < 3; ++le) {
+
+                if(pv[le] == nullptr) {
+
+                    // Facet of a virtual triangle opposite to
+                    // infinite vertex corresponds to
+                    // the triangle on the convex hull of the points.
+                    // Orientation is obtained by replacing vertex lf
+                    // with p.
+                    pv[le] = p;
+                    Sign sign = PCK::orient_2d(pv[0],pv[1],pv[2]);
+
+                    if(sign > 0) {
+                        return true;
+                    }
+
+                    if(sign < 0) {
+                        return false;
+                    }
+
+                    // If sign is zero, we check the real triangle
+                    // adjacent to the facet on the convex hull.
+                    geo_debug_assert(triangle_adjacent(t, le) >= 0);
+                    index_t t2 = index_t(triangle_adjacent(t, le));
+                    geo_debug_assert(!triangle_is_virtual(t2));
+
+                    //  If t2 is already chained in the conflict list,
+                    // then it is conflict
+                    if(triangle_is_in_list(t2)) {
+                        return true;
+                    }
+
+                    //  If t2 is marked, then it is not in conflict.
+                    if(triangle_is_marked(t2)) {
+                        return false;
+                    }
+
+                    return triangle_is_conflict(t2, p);
+                }
+            }
+
+            //   If the triangle is a finite one, it is in conflict
+            // if its circumscribed sphere contains the point (this is
+            // the standard case).
+
+            if(weighted_) {
+                double h0 = heights_[finite_triangle_vertex(t, 0)];
+                double h1 = heights_[finite_triangle_vertex(t, 1)];
+                double h2 = heights_[finite_triangle_vertex(t, 2)];
+                index_t pindex = index_t(
+                    (p - vertex_ptr(0)) / int(vertex_stride_)
+                );
+                double h = heights_[pindex];
+                return (PCK::orient_2dlifted_SOS(
+                            pv[0],pv[1],pv[2],p,h0,h1,h2,h
+                       ) > 0) ;
+            }
+
+            return (PCK::in_circle_2d_SOS(pv[0], pv[1], pv[2], p) > 0);
+        }
+
+    protected:
+
+        static index_t find_3(const signed_index_t* T, signed_index_t v) {
+            // The following expression is 10% faster than using
+            // if() statements. This uses the C++ norm, that 
+            // ensures that the 'true' boolean value converted to 
+            // an int is always 1. With most compilers, this avoids 
+            // generating branching instructions.
+            // Thank to Laurent Alonso for this idea.
+            index_t result = index_t( (T[1] == v) | ((T[2] == v) * 2) );
+            // Sanity check, important if it was T[0], not explicitly
+            // tested (detects input that does not meet the precondition).
+            geo_debug_assert(T[result] == v);
+            return result; 
+        }
+
+        virtual ~Delaunay2d();
+
+        void show_triangle(index_t t) const;
+
+        void show_triangle_adjacent(index_t t, index_t le) const;
+
+        void show_list(
+            index_t first, const std::string& list_name
+        ) const;
+
+        void check_combinatorics(bool verbose = false) const;
+
+        void check_geometry(bool verbose = false) const;
+
+    private:
+        vector<signed_index_t> cell_to_v_store_;
+        vector<signed_index_t> cell_to_cell_store_;
+        vector<index_t> cell_next_;
+        vector<index_t> reorder_;
+        index_t cur_stamp_; // used for marking
+        index_t first_free_;
+        bool weighted_;
+        vector<double> heights_; // only used in weighted mode
+
+         bool debug_mode_;
+
+         bool verbose_debug_mode_;
+
+         bool benchmark_mode_;
+
+	 static char triangle_edge_vertex_[3][2];
+
+	 std::stack<index_t> S_;
+    };
+
+    
+
+    class GEOGRAM_API RegularWeightedDelaunay2d : public Delaunay2d {
+    public:
+        RegularWeightedDelaunay2d(coord_index_t dimension = 3);
+
+    protected:
+        virtual ~RegularWeightedDelaunay2d();
+    };
 }
 
 #endif
