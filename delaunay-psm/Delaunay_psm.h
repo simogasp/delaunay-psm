@@ -1046,6 +1046,10 @@ namespace GEO {
             return nb_refs_ > 1;
         }
 
+        int nb_refs() const {
+	    return nb_refs_;
+	}
+    
         static void ref(const Counted* counted) {
             if(counted != nullptr) {
                 counted->ref();
@@ -4651,7 +4655,18 @@ namespace GEO {
         return result;
     }
     
-        
+    
+
+    struct Ray {
+	Ray(vec3 O, vec3 D) : origin(O), direction(D) {
+	}
+	Ray() {
+	}
+	vec3 origin;
+	vec3 direction;
+    };
+
+            
     
 }
 
@@ -5929,17 +5944,17 @@ namespace VBW {
 
         void init_with_tet(
 	    vec4 P0, vec4 P1, vec4 P2, vec4 P3,
-	    index_t P0_global_index,
-	    index_t P1_global_index,
-	    index_t P2_global_index,
-	    index_t P3_global_index	    
+	    global_index_t P0_global_index,
+	    global_index_t P1_global_index,
+	    global_index_t P2_global_index,
+	    global_index_t P3_global_index	    
 	);
       
 	void save(const std::string& filename, double shrink=0.0) const;
 
 
 	index_t save(
-	    std::ostream& out, index_t v_offset=1, double shrink=0.0,
+	    std::ostream& out, global_index_t v_offset=1, double shrink=0.0,
 	    bool borders_only=false
 	) const;
 
@@ -7365,7 +7380,7 @@ namespace GEO {
         bool benchmark_mode_;
         
 
-	vector<index_t> vertex_instances_;
+	vector<Numeric::uint32> vertex_instances_;
 
 	bool update_periodic_v_to_cell_;
 	vector<index_t> periodic_v_to_cell_rowptr_;
@@ -7382,3 +7397,442 @@ namespace GEO {
 }
 
 #endif
+
+/******* extracted from ../points/nn_search.h *******/
+
+#ifndef GEOGRAM_POINTS_NN_SEARCH
+#define GEOGRAM_POINTS_NN_SEARCH
+
+
+
+namespace GEO {
+
+    class GEOGRAM_API NearestNeighborSearch : public Counted {
+    public:
+        static NearestNeighborSearch* create(
+            coord_index_t dimension, const std::string& name = "default"
+        );
+
+        virtual void set_points(index_t nb_points, const double* points);
+
+        virtual bool stride_supported() const;
+
+        virtual void set_points(
+            index_t nb_points, const double* points, index_t stride
+        );
+
+        virtual void get_nearest_neighbors(
+            index_t nb_neighbors,
+            const double* query_point,
+            index_t* neighbors,
+            double* neighbors_sq_dist
+        ) const = 0;
+
+
+	struct KeepInitialValues {
+	};
+
+        virtual void get_nearest_neighbors(
+            index_t nb_neighbors,
+            const double* query_point,
+            index_t* neighbors,
+            double* neighbors_sq_dist,
+	    KeepInitialValues dummy
+        ) const;
+
+        virtual void get_nearest_neighbors(
+            index_t nb_neighbors,
+            index_t query_point,
+            index_t* neighbors,
+            double* neighbors_sq_dist
+        ) const;
+
+
+        index_t get_nearest_neighbor(
+            const double* query_point
+        ) const {
+            index_t result;
+            double sq_dist;
+            get_nearest_neighbors(1, query_point, &result, &sq_dist);
+            geo_assert(signed_index_t(result) >= 0);
+            return index_t(result);
+        }
+
+        coord_index_t dimension() const {
+            return dimension_;
+        }
+
+        index_t nb_points() const {
+            return nb_points_;
+        }
+
+        const double* point_ptr(index_t i) const {
+            geo_debug_assert(i < nb_points());
+            return points_ + i * stride_;
+        }
+
+        bool exact() const {
+            return exact_;
+        }
+
+        virtual void set_exact(bool x);
+
+    protected:
+        NearestNeighborSearch(coord_index_t dimension);
+
+        virtual ~NearestNeighborSearch();
+
+    protected:
+        coord_index_t dimension_;
+        index_t nb_points_;
+        index_t stride_;
+        const double* points_;
+        bool exact_;
+    };
+
+    typedef SmartPointer<NearestNeighborSearch> NearestNeighborSearch_var;
+
+    typedef Factory1<NearestNeighborSearch, coord_index_t>
+        NearestNeighborSearchFactory;
+
+#define geo_register_NearestNeighborSearch_creator(type, name) \
+    geo_register_creator(GEO::NearestNeighborSearchFactory, type, name)
+}
+
+#endif
+
+
+/******* extracted from ../points/kd_tree.h *******/
+
+#ifndef GEOGRAM_POINTS_KD_TREE
+#define GEOGRAM_POINTS_KD_TREE
+
+#include <algorithm>
+
+
+namespace GEO {
+
+    class GEOGRAM_API KdTree : public NearestNeighborSearch {
+    public:
+	KdTree(coord_index_t dim);
+
+	
+        virtual void set_points(index_t nb_points, const double* points);
+
+		
+        virtual bool stride_supported() const;
+
+	
+        virtual void set_points(
+            index_t nb_points, const double* points, index_t stride
+        );
+
+	
+        virtual void get_nearest_neighbors(
+            index_t nb_neighbors,
+            const double* query_point,
+            index_t* neighbors,
+            double* neighbors_sq_dist
+        ) const;
+
+	
+        virtual void get_nearest_neighbors(
+            index_t nb_neighbors,
+            const double* query_point,
+            index_t* neighbors,
+            double* neighbors_sq_dist,
+	    KeepInitialValues
+        ) const;
+
+		
+        virtual void get_nearest_neighbors(
+            index_t nb_neighbors,
+            index_t query_point,
+            index_t* neighbors,
+            double* neighbors_sq_dist
+        ) const;
+	
+	
+	
+        struct NearestNeighbors {
+
+            NearestNeighbors(
+                index_t nb_neighbors_in,
+		index_t* user_neighbors_in,
+		double* user_neighbors_sq_dist_in,
+                index_t* work_neighbors_in,
+                double* work_neighbors_sq_dist_in
+            ) :
+                nb_neighbors(0),
+		nb_neighbors_max(nb_neighbors_in),
+                neighbors(work_neighbors_in),
+		neighbors_sq_dist(work_neighbors_sq_dist_in),
+	        user_neighbors(user_neighbors_in),
+                user_neighbors_sq_dist(user_neighbors_sq_dist_in),
+	        nb_visited(0)
+	    {
+		// Yes, '<=' because we got space for n+1 neigbors
+		// in the work arrays.
+		for(index_t i = 0; i <= nb_neighbors; ++i) {
+		    neighbors[i] = index_t(-1);
+		    neighbors_sq_dist[i] = Numeric::max_float64();
+		}
+            }
+	    
+            double furthest_neighbor_sq_dist() const {
+                return
+		    nb_neighbors == nb_neighbors_max ?
+		    neighbors_sq_dist[nb_neighbors - 1] :
+		    Numeric::max_float64()
+		    ;
+            }
+
+            void insert(
+                index_t neighbor, double sq_dist
+            ) {
+		geo_debug_assert(
+		    sq_dist <= furthest_neighbor_sq_dist()
+		);
+
+		int i;
+		for(i=int(nb_neighbors); i>0; --i) {
+		    if(neighbors_sq_dist[i - 1] < sq_dist) {
+			break;
+		    } 
+		    neighbors[i] = neighbors[i - 1];
+		    neighbors_sq_dist[i] = neighbors_sq_dist[i - 1];
+		}
+
+                neighbors[i] = neighbor;
+                neighbors_sq_dist[i] = sq_dist;
+
+		if(nb_neighbors < nb_neighbors_max) {
+		    ++nb_neighbors;
+		}
+            }
+
+	    void copy_from_user() {
+		for(index_t i=0; i<nb_neighbors_max; ++i) {
+		    neighbors[i] = user_neighbors[i];
+		    neighbors_sq_dist[i] = user_neighbors_sq_dist[i];
+		}
+		neighbors[nb_neighbors_max] = index_t(-1);
+		neighbors_sq_dist[nb_neighbors_max] = Numeric::max_float64();
+		nb_neighbors = nb_neighbors_max;
+	    }
+
+	    void copy_to_user() {
+		for(index_t i=0; i<nb_neighbors_max; ++i) {
+		    user_neighbors[i] = neighbors[i];
+		    user_neighbors_sq_dist[i] = neighbors_sq_dist[i];
+		}
+	    }
+
+	    
+	    index_t nb_neighbors;
+
+	    
+	    index_t nb_neighbors_max;
+
+            index_t* neighbors;
+
+            double* neighbors_sq_dist;
+
+	    index_t* user_neighbors;
+
+	    double* user_neighbors_sq_dist;
+
+	    size_t nb_visited;
+        };
+
+        virtual void get_nearest_neighbors_recursive(
+            index_t node_index, index_t b, index_t e,
+            double* bbox_min, double* bbox_max,
+            double bbox_dist, const double* query_point,
+            NearestNeighbors& neighbors
+        ) const;
+
+	void init_bbox_and_bbox_dist_for_traversal(
+	    double* bbox_min, double* bbox_max,
+	    double& box_dist, const double* query_point
+	) const;
+
+	index_t root() const {
+	    return root_;
+	}
+	
+    protected:
+        static const index_t MAX_LEAF_SIZE = 16;
+
+	virtual index_t build_tree() = 0 ;
+
+	virtual void get_node(
+	    index_t n, index_t b, index_t e,
+	    index_t& left_child, index_t& right_child,
+	    coord_index_t&  splitting_coord,
+	    index_t& m,
+	    double& splitting_val
+	) const = 0;
+	
+
+
+	virtual void get_nearest_neighbors_leaf(
+            index_t node_index, index_t b, index_t e,
+	    const double* query_point,
+            NearestNeighbors& neighbors	    
+	) const;
+
+	void get_minmax(
+	    index_t b, index_t e, coord_index_t coord,
+	    double& minval, double& maxval
+	) const {
+	    minval = Numeric::max_float64();
+	    maxval = Numeric::min_float64();
+	    for(index_t i = b; i < e; ++i) {
+		double val = point_ptr(point_index_[i])[coord];
+		minval = std::min(minval, val);
+		maxval = std::max(maxval, val);
+	    }
+	}
+
+	double spread(index_t b, index_t e, coord_index_t coord) const {
+	    double minval,maxval;
+	    get_minmax(b,e,coord,minval,maxval);
+	    return maxval - minval;
+	}
+
+	virtual ~KdTree();
+
+      protected:
+        vector<index_t> point_index_;
+        vector<double> bbox_min_;
+        vector<double> bbox_max_;
+	index_t root_;
+    };
+
+    
+    
+    class GEOGRAM_API BalancedKdTree : public KdTree {
+    public:
+        BalancedKdTree(coord_index_t dim);
+
+    protected:
+        virtual ~BalancedKdTree();
+
+        static index_t max_node_index(
+            index_t node_id, index_t b, index_t e
+        ) {
+            if(e - b <= MAX_LEAF_SIZE) {
+                return node_id;
+            }
+            index_t m = b + (e - b) / 2;
+            return std::max(
+                max_node_index(2 * node_id, b, m),
+                max_node_index(2 * node_id + 1, m, e)
+            );
+        }
+
+        coord_index_t best_splitting_coord(index_t b, index_t e);
+
+        void create_kd_tree_recursive(
+            index_t node_index, index_t b, index_t e
+        ) {
+            if(e - b <= MAX_LEAF_SIZE) {
+                return;
+            }
+            index_t m = split_kd_node(node_index, b, e);
+            create_kd_tree_recursive(2 * node_index, b, m);
+            create_kd_tree_recursive(2 * node_index + 1, m, e);
+        }
+
+        index_t split_kd_node(
+            index_t node_index, index_t b, index_t e
+        );
+
+	
+	virtual index_t build_tree();
+
+	
+	virtual void get_node(
+	    index_t n, index_t b, index_t e,
+	    index_t& left_child, index_t& right_child,
+	    coord_index_t&  splitting_coord,
+	    index_t& m,
+	    double& splitting_val
+	) const;
+	
+    protected:
+	
+        vector<coord_index_t> splitting_coord_;
+
+        vector<double> splitting_val_;
+
+        index_t m0_, m1_, m2_, m3_, m4_, m5_, m6_, m7_, m8_;
+    };
+
+    
+
+    class GEOGRAM_API AdaptiveKdTree : public KdTree {
+    public:
+        AdaptiveKdTree(coord_index_t dim);
+
+    protected:	
+	
+	virtual index_t build_tree();
+
+	
+	virtual void get_node(
+	    index_t n, index_t b, index_t e,
+	    index_t& left_child, index_t& right_child,
+	    coord_index_t&  splitting_coord,
+	    index_t& m,
+	    double& splitting_val
+	) const;
+
+        virtual index_t create_kd_tree_recursive(
+	    index_t b, index_t e,
+            double* bbox_min, double* bbox_max	    	    
+	);
+
+        virtual void split_kd_node(
+            index_t b, index_t e,
+            double* bbox_min, double* bbox_max,
+	    index_t& m, coord_index_t& cut_dim, double& cut_val
+        );
+
+	virtual void plane_split(
+	    index_t b, index_t e, coord_index_t coord, double val,
+	    index_t& br1, index_t& br2
+	);
+
+	double point_coord(int index, coord_index_t coord) {
+	    geo_debug_assert(index >= 0);
+	    geo_debug_assert(index_t(index) < nb_points());
+	    geo_debug_assert(coord < dimension());
+	    index_t direct_index = point_index_[index_t(index)];
+	    geo_debug_assert(direct_index < nb_points());
+	    return (points_ + direct_index * stride_)[coord];
+	}
+	
+	
+	index_t nb_nodes() const {
+	    return splitting_coord_.size();
+	}
+
+	virtual index_t new_node();
+	
+     protected:
+	vector<coord_index_t> splitting_coord_;
+
+        vector<double> splitting_val_;
+
+	vector<index_t> node_m_;
+	
+	vector<index_t> node_right_child_;
+    };
+    
+        
+}
+
+#endif
+
