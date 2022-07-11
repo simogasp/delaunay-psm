@@ -6470,9 +6470,9 @@ namespace {
 
     class ProcessEnvironment : public Environment {
     protected:
-        virtual bool get_local_value(
+        bool get_local_value(
             const std::string& name, std::string& value
-        ) const {
+        ) const override {
             if(name == "sys:nb_cores") {
                 value = String::to_string(Process::number_of_cores());
                 return true;
@@ -6502,9 +6502,9 @@ namespace {
             return false;
         }
 
-        virtual bool set_local_value(
+        bool set_local_value(
             const std::string& name, const std::string& value
-        ) {
+        ) override {
             if(name == "sys:multithread") {
                 Process::enable_multithreading(String::to_bool(value));
                 return true;
@@ -6544,7 +6544,7 @@ namespace {
         }
 
         
-        virtual ~ProcessEnvironment() {
+        ~ProcessEnvironment() override {
         }
     };
 
@@ -7195,7 +7195,9 @@ namespace GEO {
 
 #ifdef GEO_OS_APPLE
 #include <mach-o/dyld.h>
+#ifdef __x86_64
 #include <xmmintrin.h>
+#endif
 #endif
 
 #ifdef GEO_OS_EMSCRIPTEN
@@ -7521,6 +7523,7 @@ namespace GEO {
 
         bool os_enable_FPE(bool flag) {
 #ifdef GEO_OS_APPLE
+/*	    
            unsigned int excepts = 0
                 // | _MM_MASK_INEXACT   // inexact result
                    | _MM_MASK_DIV_ZERO  // division by zero
@@ -7528,15 +7531,16 @@ namespace GEO {
                    | _MM_MASK_OVERFLOW  // result not representable due to overflow
                    | _MM_MASK_INVALID   // invalid operation
                    ;
+*/
             // _MM_SET_EXCEPTION_MASK(_MM_GET_EXCEPTION_MASK() & ~excepts);
             geo_argused(flag);
-            geo_argused(excepts);
+//          geo_argused(excepts);
             return true;
 #else
             int excepts = 0
-                // | FE_INEXACT   // inexact result
+                // | FE_INEXACT     // inexact result
                    | FE_DIVBYZERO   // division by zero
-                   | FE_UNDERFLOW // result not representable due to underflow
+                   | FE_UNDERFLOW   // result not representable due to underflow
                    | FE_OVERFLOW    // result not representable due to overflow
                    | FE_INVALID     // invalid operation
                    ;
@@ -19258,6 +19262,12 @@ inline int det_compare_4d_filter( const double* p0, const double* p1, const doub
 #include <emmintrin.h>
 #endif
 
+#ifdef PCK_STATS
+#define PCK_STAT(x) x
+#else
+#define PCK_STAT(x)
+#endif
+
 namespace {
 
     using namespace GEO;
@@ -19425,9 +19435,9 @@ namespace {
         return FPG_UNCERTAIN_VALUE;
     }
 
-
     using namespace GEO;
 
+#ifdef PCK_STATS    
     index_t cnt_side1_total = 0;
     index_t cnt_side1_exact = 0;
     index_t cnt_side1_SOS = 0;
@@ -19484,7 +19494,8 @@ namespace {
     index_t cnt_det3d_total = 0;
     index_t cnt_det3d_exact = 0;
     index_t len_det3d = 0;
-  
+#endif
+    
     // ================= side1 =========================================
 
     Sign side1_exact_SOS(
@@ -19492,17 +19503,17 @@ namespace {
         const double* q0,
         coord_index_t dim
     ) {
-        cnt_side1_exact++;
+        PCK_STAT(cnt_side1_exact++);
         expansion& l = expansion_sq_dist(p0, p1, dim);
         expansion& a = expansion_dot_at(p1, q0, p0, dim).scale_fast(2.0);
         expansion& r = expansion_diff(l, a);
         Sign r_sign = r.sign();
         // Symbolic perturbation, Simulation of Simplicity
         if(r_sign == ZERO) {
-            cnt_side1_SOS++;
+            PCK_STAT(cnt_side1_SOS++);
             return (p0 < p1) ? POSITIVE : NEGATIVE;
         }
-        len_side1 = std::max(len_side1, r.length());
+        PCK_STAT(len_side1 = std::max(len_side1, r.length()));
         return r_sign;
     }
 
@@ -19563,7 +19574,7 @@ namespace {
         const double* q0, const double* q1,
         coord_index_t dim
     ) {
-        cnt_side2_exact++;
+        PCK_STAT(cnt_side2_exact++);
 
         const expansion& l1 = expansion_sq_dist(p1, p0, dim);
         const expansion& l2 = expansion_sq_dist(p2, p0, dim);
@@ -19597,12 +19608,12 @@ namespace {
         Sign r_sign = r.sign();
 
         // Statistics
-        len_side2_num = std::max(len_side2_num, r.length());
-        len_side2_denom = std::max(len_side2_denom, Delta.length());
+        PCK_STAT(len_side2_num = std::max(len_side2_num, r.length()));
+        PCK_STAT(len_side2_denom = std::max(len_side2_denom, Delta.length()));
 
         // Simulation of Simplicity (symbolic perturbation)
         if(r_sign == ZERO) {
-            cnt_side2_SOS++;
+            PCK_STAT(cnt_side2_SOS++);
             const double* p_sort[3];
             p_sort[0] = p0;
             p_sort[1] = p1;
@@ -19615,7 +19626,7 @@ namespace {
                     const expansion& z1 = expansion_diff(Delta, a21);
                     const expansion& z = expansion_sum(z1, a20);
                     Sign z_sign = z.sign();
-                    len_side2_SOS = std::max(len_side2_SOS, z.length());
+                    PCK_STAT(len_side2_SOS = std::max(len_side2_SOS, z.length()));
                     if(z_sign != ZERO) {
                         return Sign(Delta_sign * z_sign);
                     }
@@ -19623,7 +19634,7 @@ namespace {
                 if(p_sort[i] == p1) {
                     const expansion& z = expansion_diff(a21, a20);
                     Sign z_sign = z.sign();
-                    len_side2_SOS = std::max(len_side2_SOS, z.length());
+                    PCK_STAT(len_side2_SOS = std::max(len_side2_SOS, z.length()));
                     if(z_sign != ZERO) {
                         return Sign(Delta_sign * z_sign);
                     }
@@ -19700,7 +19711,7 @@ namespace {
         const double* q0, const double* q1, const double* q2,
         coord_index_t dim
     ) {
-        cnt_side3_exact++;
+        PCK_STAT(cnt_side3_exact++);
 
         const expansion& l1 = expansion_sq_dist(p1, p0, dim);
         const expansion& l2 = expansion_sq_dist(p2, p0, dim);
@@ -19763,12 +19774,12 @@ namespace {
         Sign r_sign = r.sign();
 
         // Statistics
-        len_side3_num = std::max(len_side3_num, r.length());
-        len_side3_denom = std::max(len_side3_denom, Delta.length());
+        PCK_STAT(len_side3_num = std::max(len_side3_num, r.length()));
+        PCK_STAT(len_side3_denom = std::max(len_side3_denom, Delta.length()));
 
         // Simulation of Simplicity (symbolic perturbation)
         if(r_sign == ZERO) {
-            cnt_side3_SOS++;
+            PCK_STAT(cnt_side3_SOS++);
             const double* p_sort[4];
             p_sort[0] = p0;
             p_sort[1] = p1;
@@ -19785,7 +19796,7 @@ namespace {
                     const expansion& z3 = expansion_product(a32, z3_0).negate();
                     const expansion& z = expansion_sum4(Delta, z1, z2, z3);
                     Sign z_sign = z.sign();
-                    len_side3_SOS = std::max(len_side3_SOS, z.length());
+                    PCK_STAT(len_side3_SOS = std::max(len_side3_SOS, z.length()));
                     if(z_sign != ZERO) {
                         return Sign(Delta_sign * z_sign);
                     }
@@ -19795,7 +19806,7 @@ namespace {
                     const expansion& z3 = expansion_product(a32, b21);
                     const expansion& z = expansion_sum3(z1, z2, z3);
                     Sign z_sign = z.sign();
-                    len_side3_SOS = std::max(len_side3_SOS, z.length());
+                    PCK_STAT(len_side3_SOS = std::max(len_side3_SOS, z.length()));
                     if(z_sign != ZERO) {
                         return Sign(Delta_sign * z_sign);
                     }
@@ -19805,7 +19816,7 @@ namespace {
                     const expansion& z3 = expansion_product(a32, b22);
                     const expansion& z = expansion_sum3(z1, z2, z3);
                     Sign z_sign = z.sign();
-                    len_side3_SOS = std::max(len_side3_SOS, z.length());
+                    PCK_STAT(len_side3_SOS = std::max(len_side3_SOS, z.length()));
                     if(z_sign != ZERO) {
                         return Sign(Delta_sign * z_sign);
                     }
@@ -19824,7 +19835,7 @@ namespace {
         double h0, double h1, double h2, double h3,
         const double* q0, const double* q1, const double* q2
     ) {
-        cnt_side3h_exact++;
+        PCK_STAT(cnt_side3h_exact++);
 
         const expansion& l1 = expansion_diff(h1,h0);
         const expansion& l2 = expansion_diff(h2,h0);
@@ -19887,12 +19898,12 @@ namespace {
         Sign r_sign = r.sign();
 
         // Statistics
-        len_side3h_num = std::max(len_side3h_num, r.length());
-        len_side3h_denom = std::max(len_side3h_denom, Delta.length());
+        PCK_STAT(len_side3h_num = std::max(len_side3h_num, r.length()));
+        PCK_STAT(len_side3h_denom = std::max(len_side3h_denom, Delta.length()));
 
         // Simulation of Simplicity (symbolic perturbation)
         if(r_sign == ZERO) {
-            cnt_side3h_SOS++;
+            PCK_STAT(cnt_side3h_SOS++);
             const double* p_sort[4];
             p_sort[0] = p0;
             p_sort[1] = p1;
@@ -19910,7 +19921,7 @@ namespace {
                     const expansion& z3 = expansion_product(a32, z3_0).negate();
                     const expansion& z = expansion_sum4(Delta, z1, z2, z3);
                     Sign z_sign = z.sign();
-                    len_side3h_SOS = std::max(len_side3h_SOS, z.length());
+                    PCK_STAT(len_side3h_SOS = std::max(len_side3h_SOS, z.length()));
                     if(z_sign != ZERO) {
                         return Sign(Delta_sign * z_sign);
                     }
@@ -19920,7 +19931,7 @@ namespace {
                     const expansion& z3 = expansion_product(a32, b21);
                     const expansion& z = expansion_sum3(z1, z2, z3);
                     Sign z_sign = z.sign();
-                    len_side3h_SOS = std::max(len_side3h_SOS, z.length());
+                    PCK_STAT(len_side3h_SOS = std::max(len_side3h_SOS, z.length()));
                     if(z_sign != ZERO) {
                         return Sign(Delta_sign * z_sign);
                     }
@@ -19930,7 +19941,7 @@ namespace {
                     const expansion& z3 = expansion_product(a32, b22);
                     const expansion& z = expansion_sum3(z1, z2, z3);
                     Sign z_sign = z.sign();
-                    len_side3h_SOS = std::max(len_side3h_SOS, z.length());
+                    PCK_STAT(len_side3h_SOS = std::max(len_side3h_SOS, z.length()));
                     if(z_sign != ZERO) {
                         return Sign(Delta_sign * z_sign);
                     }
@@ -20006,7 +20017,7 @@ namespace {
         const double* p0, const double* p1, const double* p2, const double* p3,
         const double* p4, bool sos = true
     ) {
-        cnt_side4_exact++;
+        PCK_STAT(cnt_side4_exact++);
 
         const expansion& a11 = expansion_diff(p1[0], p0[0]);
         const expansion& a12 = expansion_diff(p1[1], p0[1]);
@@ -20095,12 +20106,12 @@ namespace {
         Sign r_sign = r.sign();
 
         // Statistics
-        len_side4_num = std::max(len_side4_num, r.length());
-        len_side4_denom = std::max(len_side4_denom, Delta1.length());
+        PCK_STAT(len_side4_num = std::max(len_side4_num, r.length()));
+        PCK_STAT(len_side4_denom = std::max(len_side4_denom, Delta1.length()));
 
         // Simulation of Simplicity (symbolic perturbation)
         if(sos && r_sign == ZERO) {
-            cnt_side4_SOS++;
+            PCK_STAT(cnt_side4_SOS++);
             const double* p_sort[5];
             p_sort[0] = p0;
             p_sort[1] = p1;
@@ -20114,26 +20125,26 @@ namespace {
                     const expansion& z2 = expansion_diff(Delta4, Delta3);
                     const expansion& z = expansion_sum(z1, z2);
                     Sign z_sign = z.sign();
-                    len_side4_SOS = std::max(len_side4_SOS, z.length());
+                    PCK_STAT(len_side4_SOS = std::max(len_side4_SOS, z.length()));
                     if(z_sign != ZERO) {
                         return Sign(Delta4_sign * z_sign);
                     }
                 } else if(p_sort[i] == p1) {
                     Sign Delta1_sign = Delta1.sign();
                     if(Delta1_sign != ZERO) {
-                        len_side4_SOS = std::max(len_side4_SOS, Delta1.length());
+                        PCK_STAT(len_side4_SOS = std::max(len_side4_SOS, Delta1.length()));
                         return Sign(Delta4_sign * Delta1_sign);
                     }
                 } else if(p_sort[i] == p2) {
                     Sign Delta2_sign = Delta2.sign();
                     if(Delta2_sign != ZERO) {
-                        len_side4_SOS = std::max(len_side4_SOS, Delta2.length());
+                        PCK_STAT(len_side4_SOS = std::max(len_side4_SOS, Delta2.length()));
                         return Sign(-Delta4_sign * Delta2_sign);
                     }
                 } else if(p_sort[i] == p3) {
                     Sign Delta3_sign = Delta3.sign();
                     if(Delta3_sign != ZERO) {
-                        len_side4_SOS = std::max(len_side4_SOS, Delta3.length());
+                        PCK_STAT(len_side4_SOS = std::max(len_side4_SOS, Delta3.length()));
                         return Sign(Delta4_sign * Delta3_sign);
                     }
                 } else if(p_sort[i] == p4) {
@@ -20150,7 +20161,7 @@ namespace {
         const double* q0, const double* q1, const double* q2, const double* q3,
         coord_index_t dim
     ) {
-        cnt_side4_exact++;
+        PCK_STAT(cnt_side4_exact++);
 
         const expansion& l1 = expansion_sq_dist(p1, p0, dim);
         const expansion& l2 = expansion_sq_dist(p2, p0, dim);
@@ -20253,7 +20264,7 @@ namespace {
 
         // Simulation of Simplicity (symbolic perturbation)
         if(r_sign == ZERO) {
-            cnt_side4_SOS++;
+            PCK_STAT(cnt_side4_SOS++);
             const double* p_sort[5];
             p_sort[0] = p0;
             p_sort[1] = p1;
@@ -20274,7 +20285,7 @@ namespace {
                     const expansion& z1234 = expansion_sum4(z1, z2, z3, z4);
                     const expansion& z = expansion_diff(Delta, z1234);
                     Sign z_sign = z.sign();
-                    len_side4_SOS = std::max(len_side4_SOS, z.length());
+                    PCK_STAT(len_side4_SOS = std::max(len_side4_SOS, z.length()));
                     if(z_sign != ZERO) {
                         return Sign(Delta_sign * z_sign);
                     }
@@ -20285,7 +20296,7 @@ namespace {
                     const expansion& z4 = expansion_product(a33, b31);
                     const expansion& z = expansion_sum4(z1, z2, z3, z4);
                     Sign z_sign = z.sign();
-                    len_side4_SOS = std::max(len_side4_SOS, z.length());
+                    PCK_STAT(len_side4_SOS = std::max(len_side4_SOS, z.length()));
                     if(z_sign != ZERO) {
                         return Sign(Delta_sign * z_sign);
                     }
@@ -20296,7 +20307,7 @@ namespace {
                     const expansion& z4 = expansion_product(a33, b32);
                     const expansion& z = expansion_sum4(z1, z2, z3, z4);
                     Sign z_sign = z.sign();
-                    len_side4_SOS = std::max(len_side4_SOS, z.length());
+                    PCK_STAT(len_side4_SOS = std::max(len_side4_SOS, z.length()));
                     if(z_sign != ZERO) {
                         return Sign(Delta_sign * z_sign);
                     }
@@ -20307,7 +20318,7 @@ namespace {
                     const expansion& z4 = expansion_product(a33, b33);
                     const expansion& z = expansion_sum4(z1, z2, z3, z4);
                     Sign z_sign = z.sign();
-                    len_side4_SOS = std::max(len_side4_SOS, z.length());
+                    PCK_STAT(len_side4_SOS = std::max(len_side4_SOS, z.length()));
                     if(z_sign != ZERO) {
                         return Sign(Delta_sign * z_sign);
                     }
@@ -20373,7 +20384,7 @@ namespace {
     Sign orient_2d_exact(
         const double* p0, const double* p1, const double* p2
     ) {
-        cnt_orient2d_exact++;
+        PCK_STAT(cnt_orient2d_exact++);
 
         const expansion& a11 = expansion_diff(p1[0], p0[0]);
         const expansion& a12 = expansion_diff(p1[1], p0[1]);
@@ -20385,7 +20396,7 @@ namespace {
             a11, a12, a21, a22
         );
 
-        len_orient2d = std::max(len_orient2d, Delta.length());
+        PCK_STAT(len_orient2d = std::max(len_orient2d, Delta.length()));
 
         return Delta.sign();
     }
@@ -20397,7 +20408,7 @@ namespace {
         const double* p0, const double* p1,
         const double* p2, const double* p3
     ) {
-        cnt_orient3d_exact++;
+        PCK_STAT(cnt_orient3d_exact++);
 
         const expansion& a11 = expansion_diff(p1[0], p0[0]);
         const expansion& a12 = expansion_diff(p1[1], p0[1]);
@@ -20415,7 +20426,7 @@ namespace {
             a11, a12, a13, a21, a22, a23, a31, a32, a33
         );
 
-        len_orient3d = std::max(len_orient3d, Delta.length());
+        PCK_STAT(len_orient3d = std::max(len_orient3d, Delta.length()));
 
         return Delta.sign();
     }
@@ -20426,7 +20437,7 @@ namespace {
         double h0, double h1, double h2, double h3, double h4,
         bool sos = true
     ) {
-        cnt_orient3dh_exact++;
+        PCK_STAT(cnt_orient3dh_exact++);
 
         const expansion& a11 = expansion_diff(p1[0], p0[0]);
         const expansion& a12 = expansion_diff(p1[1], p0[1]);
@@ -20484,12 +20495,12 @@ namespace {
         Sign r_sign = r.sign();
 
         // Statistics
-        len_orient3dh_num = std::max(len_orient3dh_num, r.length());
-        len_orient3dh_denom = std::max(len_orient3dh_denom, Delta1.length());
+        PCK_STAT(len_orient3dh_num = std::max(len_orient3dh_num, r.length()));
+        PCK_STAT(len_orient3dh_denom = std::max(len_orient3dh_denom, Delta1.length()));
 
         // Simulation of Simplicity (symbolic perturbation)
         if(sos && r_sign == ZERO) {
-            cnt_orient3dh_SOS++;
+            PCK_STAT(cnt_orient3dh_SOS++);
             const double* p_sort[5];
             p_sort[0] = p0;
             p_sort[1] = p1;
@@ -20504,32 +20515,26 @@ namespace {
                     const expansion& z2 = expansion_diff(Delta4, Delta3);
                     const expansion& z = expansion_sum(z1, z2);
                     Sign z_sign = z.sign();
-                    len_orient3dh_SOS = std::max(len_orient3dh_SOS, z.length());
+                    PCK_STAT(len_orient3dh_SOS = std::max(len_orient3dh_SOS, z.length()));
                     if(z_sign != ZERO) {
                         return Sign(Delta4_sign * z_sign);
                     }
                 } else if(p_sort[i] == p1) {
                     Sign Delta1_sign = Delta1.sign();
                     if(Delta1_sign != ZERO) {
-                        len_orient3dh_SOS = std::max(
-			    len_orient3dh_SOS, Delta1.length()
-			 );
+                        PCK_STAT(len_orient3dh_SOS = std::max(len_orient3dh_SOS, Delta1.length()));
                         return Sign(Delta4_sign * Delta1_sign);
                     }
                 } else if(p_sort[i] == p2) {
                     Sign Delta2_sign = Delta2.sign();
                     if(Delta2_sign != ZERO) {
-                        len_orient3dh_SOS = std::max(
-			    len_orient3dh_SOS, Delta2.length()
-			);
+                        PCK_STAT(len_orient3dh_SOS = std::max(len_orient3dh_SOS, Delta2.length()));
                         return Sign(-Delta4_sign * Delta2_sign);
                     }
                 } else if(p_sort[i] == p3) {
                     Sign Delta3_sign = Delta3.sign();
                     if(Delta3_sign != ZERO) {
-                        len_orient3dh_SOS = std::max(
-			    len_orient3dh_SOS, Delta3.length()
-			);
+                        PCK_STAT(len_orient3dh_SOS = std::max(len_orient3dh_SOS, Delta3.length()));
                         return Sign(Delta4_sign * Delta3_sign);
                     }
                 } else if(p_sort[i] == p4) {
@@ -20623,7 +20628,7 @@ namespace {
     Sign det_3d_exact(
 	const double* p0, const double* p1, const double* p2
     ) {
-        cnt_det3d_exact++;
+        PCK_STAT(cnt_det3d_exact++);
 	
 	const expansion& p0_0 = expansion_create(p0[0]);
 	const expansion& p0_1 = expansion_create(p0[1]);
@@ -20643,7 +20648,7 @@ namespace {
 	    p2_0, p2_1, p2_2
 	);
 	
-        len_det3d = std::max(len_det3d, Delta.length());
+        PCK_STAT(len_det3d = std::max(len_det3d, Delta.length()));
 	
 	return Delta.sign();
     }
@@ -20713,6 +20718,7 @@ namespace {
     
     // ================================ statistics ========================
 
+#ifdef PCK_STATS    
     inline double percent(index_t a, index_t b) {
         if(a == 0 && b == 0) {
             return 0;
@@ -20772,6 +20778,8 @@ namespace {
             << " SOS len: " << SOS_len
             << std::endl;
     }
+#endif
+    
 }
 
 
@@ -20794,7 +20802,7 @@ namespace GEO {
             const double* q0,
             coord_index_t DIM
         ) {
-            cnt_side1_total++;
+            PCK_STAT(cnt_side1_total++);
             switch(DIM) {
             case 3:
                 return side1_3d_SOS(p0, p1, q0);
@@ -20815,7 +20823,7 @@ namespace GEO {
             const double* q0, const double* q1,
             coord_index_t DIM
         ) {
-            cnt_side2_total++;
+            PCK_STAT(cnt_side2_total++);
             switch(DIM) {
             case 3:
                 return side2_3d_SOS(p0, p1, p2, q0, q1);
@@ -20837,7 +20845,7 @@ namespace GEO {
             const double* q0, const double* q1, const double* q2,
             coord_index_t DIM
         ) {
-            cnt_side3_total++;
+            PCK_STAT(cnt_side3_total++);
             switch(DIM) {
             case 3:
                 return side3_3d_SOS(p0, p1, p2, p3, q0, q1, q2);
@@ -20890,16 +20898,16 @@ namespace GEO {
                 // incremented in side4_3d_SOS().
                 return side4_3d_SOS(p0, p1, p2, p3, p4);
             case 4:
-                cnt_side4_total++;
+                PCK_STAT(cnt_side4_total++);
                 return side4_4d_SOS(p0, p1, p2, p3, p4, q0, q1, q2, q3);
             case 6:
-                cnt_side4_total++;
+                PCK_STAT(cnt_side4_total++);
                 return side4_6d_SOS(p0, p1, p2, p3, p4, q0, q1, q2, q3);
             case 7:
-                cnt_side4_total++;
+                PCK_STAT(cnt_side4_total++);
                 return side4_7d_SOS(p0, p1, p2, p3, p4, q0, q1, q2, q3);
             case 8:
-                cnt_side4_total++;
+                PCK_STAT(cnt_side4_total++);
                 return side4_8d_SOS(p0, p1, p2, p3, p4, q0, q1, q2, q3);
             }
             geo_assert_not_reached;
@@ -20910,7 +20918,7 @@ namespace GEO {
             const double* p0, const double* p1, const double* p2,
 	    const double* p3, const double* p4
         ) {
-            cnt_side4_total++;
+            PCK_STAT(cnt_side4_total++);
             Sign result = Sign(side4_3d_filter(p0, p1, p2, p3, p4));
             if(result == 0) {
                 // last argument is false: do not apply symbolic perturbation
@@ -20924,7 +20932,7 @@ namespace GEO {
             const double* p2, const double* p3,
             const double* p4
         ) {
-            cnt_side4_total++;
+            PCK_STAT(cnt_side4_total++);
             Sign result = Sign(side4_3d_filter(p0, p1, p2, p3, p4));
             if(result == 0) {
                 result = side4_3d_exact_SOS(p0, p1, p2, p3, p4);
@@ -20951,7 +20959,7 @@ namespace GEO {
             // Therefore:
             // in_sphere_3d(p0,p1,p2,p3,p4) = -side4_3d(p0,p1,p2,p3,p4)
 
-            cnt_side4_total++;
+            PCK_STAT(cnt_side4_total++);
             
             // This specialized filter supposes that orient_3d(p0,p1,p2,p3) > 0
 
@@ -21027,7 +21035,7 @@ namespace GEO {
         Sign orient_2d(
             const double* p0, const double* p1, const double* p2
         ) {
-            cnt_orient2d_total++;
+            PCK_STAT(cnt_orient2d_total++);
             Sign result = Sign(orient_2d_filter(p0, p1, p2));
             if(result == 0) {
                 result = orient_2d_exact(p0, p1, p2);
@@ -21061,7 +21069,7 @@ namespace GEO {
             const double* p0, const double* p1,
             const double* p2, const double* p3
             ) {
-            cnt_orient3d_total++;
+            PCK_STAT(cnt_orient3d_total++);
             Sign result = Sign(orient_3d_filter(p0, p1, p2, p3));
             if(result == 0) {
                 result = orient_3d_exact(p0, p1, p2, p3);
@@ -21075,7 +21083,7 @@ namespace GEO {
             const double* p2, const double* p3, const double* p4,
             double h0, double h1, double h2, double h3, double h4
         ) {
-            cnt_orient3dh_total++;
+            PCK_STAT(cnt_orient3dh_total++);
             Sign result = Sign(
                 side4h_3d_filter(
                     p0, p1, p2, p3, p4, h0, h1, h2, h3, h4
@@ -21097,7 +21105,7 @@ namespace GEO {
             const double* p2, const double* p3, const double* p4,
             double h0, double h1, double h2, double h3, double h4
         ) {
-            cnt_orient3dh_total++;
+            PCK_STAT(cnt_orient3dh_total++);
             Sign result = Sign(
                 side4h_3d_filter(
                     p0, p1, p2, p3, p4, h0, h1, h2, h3, h4
@@ -21116,7 +21124,7 @@ namespace GEO {
 	Sign det_3d(
 	    const double* p0, const double* p1, const double* p2
 	) {
-            cnt_det3d_total++;	  
+            PCK_STAT(cnt_det3d_total++);	  
 	    Sign result = Sign(
 		det_3d_filter(p0, p1, p2)
 	    );
@@ -21131,13 +21139,13 @@ namespace GEO {
 	    const double* p0, const double* p1,
 	    const double* p2, const double* p3
 	) {
-            cnt_det4d_total++;	  	  
+            PCK_STAT(cnt_det4d_total++);	  	  
 	    Sign result = Sign(
 		det_4d_filter(p0, p1, p2, p3)
 	    );
-	    
+
 	    if(result == 0) {
-	        cnt_det4d_exact++;
+	        PCK_STAT(cnt_det4d_exact++);
 		
 		const expansion& p0_0 = expansion_create(p0[0]);
 		const expansion& p0_1 = expansion_create(p0[1]);
@@ -21295,6 +21303,7 @@ namespace GEO {
         }
 
         void show_stats() {
+#ifdef PCK_STATS
             show_stats_plain(
                 "orient2d",
                 cnt_orient2d_total, cnt_orient2d_exact,
@@ -21345,6 +21354,11 @@ namespace GEO {
                 cnt_det4d_total, cnt_det4d_exact,
                 len_det4d
             );
+#else
+	    Logger::out("PCK") << "No stats available." << std::endl;
+	    Logger::out("PCK") << "Define PCK_STATS in predicates.h to get them."
+			       << std::endl;
+#endif	    
         }
     }
 }
@@ -21581,11 +21595,11 @@ namespace GEO {
     public:
         Delaunay3d(coord_index_t dimension = 3);
 
-        virtual void set_vertices(
+        void set_vertices(
             index_t nb_vertices, const double* vertices
-        );
+        ) override;
 
-        virtual index_t nearest_vertex(const double* p) const;
+        index_t nearest_vertex(const double* p) const override;
 
 
     protected:
@@ -22044,7 +22058,7 @@ namespace GEO {
             return result; 
         }
 
-        virtual ~Delaunay3d();
+        ~Delaunay3d() override;
 
         void show_tet(index_t t) const;
 
@@ -22164,7 +22178,7 @@ namespace GEO {
         RegularWeightedDelaunay3d(coord_index_t dimension = 4);
 
     protected:
-        virtual ~RegularWeightedDelaunay3d();
+         ~RegularWeightedDelaunay3d() override;
     };
 }
 
@@ -22188,13 +22202,13 @@ namespace GEO {
     public:
         ParallelDelaunay3d(coord_index_t dimension = 3);
 
-        virtual void set_vertices(
+        void set_vertices(
             index_t nb_vertices, const double* vertices
-        );
+        ) override;
 
-        virtual index_t nearest_vertex(const double* p) const;
+        index_t nearest_vertex(const double* p) const override;
 
-        virtual void set_BRIO_levels(const vector<index_t>& levels);
+        void set_BRIO_levels(const vector<index_t>& levels) override;
 
     private:
         vector<signed_index_t> cell_to_v_store_;
@@ -22711,6 +22725,8 @@ namespace GEO {
         verbose_debug_mode_ = CmdLine::get_arg_bool("dbg:delaunay_verbose");
         debug_mode_ = (debug_mode_ || verbose_debug_mode_);
         benchmark_mode_ = CmdLine::get_arg_bool("dbg:delaunay_benchmark");
+	has_empty_cells_ = false;
+	abort_if_empty_cell_ = false;
     }
 
     Delaunay2d::~Delaunay2d() {
@@ -22719,6 +22735,7 @@ namespace GEO {
     void Delaunay2d::set_vertices(
         index_t nb_vertices, const double* vertices
     ) {
+        has_empty_cells_ = false;
         Stopwatch* W = nullptr;
         if(benchmark_mode_) {
             W = new Stopwatch("DelInternal");
@@ -22790,7 +22807,12 @@ namespace GEO {
             // Do not re-insert the first four vertices.
             if(v != v0 && v != v1 && v != v2) {
                 index_t new_hint = insert(v, hint);
-                if(new_hint != NO_TRIANGLE) {
+		if(new_hint == NO_TRIANGLE) {
+		  has_empty_cells_ = true;
+		  if(abort_if_empty_cell_) {
+		    return;
+		  }
+		} else {
                     hint = new_hint;
                 }
             }
@@ -22926,6 +22948,11 @@ namespace GEO {
             nb_triangles,
             cell_to_v_store_.data(), cell_to_cell_store_.data()
         );
+
+	// Not mandatory, but doing so makes it possible to
+	// use locate() in derived classes outside of
+	// set_vertices().
+	cell_next_.assign(cell_next_.size(),~index_t(0));
     }
 
     index_t Delaunay2d::nearest_vertex(const double* p) const {
@@ -26973,9 +27000,9 @@ namespace GEO {
                 Delaunay3dThread* thread = 
                     static_cast<Delaunay3dThread*>(threads_[t].get());
                 Logger::out("PDEL") 
-                    << "thread " << t << " : " 
-                    << thread->nb_rollbacks() << " rollbacks  "
-                    << thread->nb_failed_locate() << " failed locate"
+                    << "thread " << std::setw(3) << t << " : " 
+                    << std::setw(3) << thread->nb_rollbacks() << " rollbacks  "
+                    << std::setw(3) << thread->nb_failed_locate() << " restarted locate"
                     << std::endl;
                 tot_rollbacks += thread->nb_rollbacks();
                 tot_failed_locate += thread->nb_failed_locate();
@@ -26983,7 +27010,7 @@ namespace GEO {
             Logger::out("PDEL") << "------------------" << std::endl;
             Logger::out("PDEL") << "total: " 
                                 << tot_rollbacks << " rollbacks  "
-                                << tot_failed_locate << " failed locate"
+                                << tot_failed_locate << " restarted locate"
                                 << std::endl;
         }
 
@@ -27263,8 +27290,10 @@ namespace VBW {
 	max_t_(64),
 	max_v_(32),
 	t_(max_t_),
-	vv2t_(max_v_*max_v_),
-	plane_eqn_(max_v_)
+	t_adj_(max_t_),
+	plane_eqn_(max_v_),
+	v2t_(max_v_),
+	v2e_(max_v_)
     {
 #ifndef STANDALONE_CONVEX_CELL
 	use_exact_predicates_ = true;
@@ -27282,6 +27311,8 @@ namespace VBW {
 	if(has_tflags_) {
 	    tflags_.assign(max_t_,0);
 	}
+	v2t_.assign(max_v_,ushort(-1));
+	v2e_.assign(max_v_,uchar(-1));	
     }
 
     
@@ -27298,15 +27329,6 @@ namespace VBW {
 	for(index_t t=0; t<max_t(); ++t) {
 	    set_triangle_flags(t, END_OF_LIST);
 	}
-
-	// Initializing edge table, just for
-	// debugging purposes.
-	/*
-	for(index_t v1=0; v1<max_v(); ++v1) {
-	    for(index_t v2=0; v2<max_v(); ++v2) {
-		set_vv2t(v1, v2, END_OF_LIST);
-	    }
-	}*/
 #endif
     }
     
@@ -27372,12 +27394,17 @@ namespace VBW {
 	plane_eqn_[boff+2] = P2;
 	plane_eqn_[boff+3] = P3;
 
-	new_triangle(boff+3, boff+2, boff+1);
-	new_triangle(boff+3, boff+0, boff+2);
-	new_triangle(boff+3, boff+1, boff+0);
-	new_triangle(boff+2, boff+0, boff+1);
+        //   Create the 4 triangles (that correspond to
+	//          the 4 vertices of the tetrahedron)
+ 	//   (Unused) adjacency info. ----------.
+	//   Triangle vertices -.               |
+        //                      v               v
+	new_triangle(boff+3, boff+2, boff+1, 3, 2, 1);
+	new_triangle(boff+3, boff+0, boff+2, 3, 0, 2);
+	new_triangle(boff+3, boff+1, boff+0, 3, 1, 0);
+	new_triangle(boff+2, boff+0, boff+1, 2, 0, 1);
 	
-	// We already created 6 vertices (for the 6 bounding box
+	// We already created 4 vertices (for the 4 facets
 	// plane equations) plus the vertex at infinity.
 	nb_v_ = 5;
 
@@ -27436,7 +27463,7 @@ namespace VBW {
 		TriangleWithFlags T = get_triangle_and_flags(t);
 		vec4 p;
 		if(geometry_dirty_) {
-		    p = compute_triangle_point(T);
+		    p = compute_triangle_point(t);
 		    p.x /= p.w;
 		    p.y /= p.w;
 		    p.z /= p.w;
@@ -27468,7 +27495,7 @@ namespace VBW {
 	       has_vglobal() &&
 	       v_global_index(v) != global_index_t(-1) &&
 	       v_global_index(v) != global_index_t(-2)
-                // inde_t(-2) is for fluid free bndry
+                // index_t(-2) is for fluid free bndry
 	    ) {
 		continue;
 	    }
@@ -27525,7 +27552,7 @@ namespace VBW {
 	    index_t t = first_valid_;
 	    while(t != END_OF_LIST) { 
 		TriangleWithFlags T = get_triangle_and_flags(t);
-		vec4 p = compute_triangle_point(T);
+		vec4 p = compute_triangle_point(t);
 		p.x /= p.w;
 		p.y /= p.w;
 		p.z /= p.w;
@@ -27902,33 +27929,97 @@ namespace VBW {
 	    return;
 	}
 
-	// Triangulate conflict zone
-        index_t t = conflict_head;
-        while(t != END_OF_LIST) { 
-	    TriangleWithFlags T = get_triangle_and_flags(t);
-	    
-	    index_t adj1 = vv2t(T.j,T.i);
-	    index_t adj2 = vv2t(T.k,T.j);
-	    index_t adj3 = vv2t(T.i,T.k);
-	    
-	    ushort flg1 = get_triangle_flags(adj1);
-	    ushort flg2 = get_triangle_flags(adj2);
-	    ushort flg3 = get_triangle_flags(adj3);
-	    
-	    if(	!(flg1 & ushort(CONFLICT_MASK)) ) {
-		new_triangle(lv, T.i, T.j);
+
+	// Link the vertices on the border of the conflict zone.
+	// Consider the edge e of triangle t such that:
+	//    t is not marked as conflict
+	//    triangle_adjacent(t,e) is marked as conflict
+	// Let v1 = triangle_vertex(t, (e+1)%3)
+	//     v2 = triangle_vertex(t, (e+2)%3)
+	// We set:
+	//     v2t_[v1] = t
+	//     v2e_[v1] = e
+	// Once done for all the triangles, one can traverse the
+	// border of the conflict zone with:
+	//
+	// v = first_v_on_border]
+	// do {
+	//    t = v2t_[v];
+	//    e = v2t_[e];
+	//    do something with t,e
+	//    v = triangle_vertex(t, (e+2)%3);
+	// } while(v != first_v_on_border]);
+
+	index_t nb = 0; // for sanity check, number of vertices on border
+	                // of conflict zone.
+	VBW::index_t first_v_on_border = END_OF_LIST;
+	for(
+	    VBW::ushort t = first_triangle();
+	    t != END_OF_LIST;
+	    t = next_triangle(t)
+	) {
+	    vbw_assert(!triangle_is_marked_as_conflict(t));
+
+	    if(triangle_is_marked_as_conflict(triangle_adjacent(t,0))) {
+		first_v_on_border = triangle_vertex(t,1);
+		v2t_[first_v_on_border] = t;
+		v2e_[first_v_on_border] = 0;
+		++nb;
 	    }
-	    
-	    if(	!(flg2 & ushort(CONFLICT_MASK)) ) {
-		new_triangle(lv, T.j, T.k);		
+	    if(triangle_is_marked_as_conflict(triangle_adjacent(t,1))) {
+		first_v_on_border = triangle_vertex(t,2);
+		v2t_[first_v_on_border] = t;
+		v2e_[first_v_on_border] = 1;
+		++nb;		
 	    }
-	    
-	    if(	!(flg3 & ushort(CONFLICT_MASK)) ) {
-		new_triangle(lv, T.k, T.i);
+	    if(triangle_is_marked_as_conflict(triangle_adjacent(t,2))) {
+		first_v_on_border = triangle_vertex(t,0);
+		v2t_[first_v_on_border] = t;
+		v2e_[first_v_on_border] = 2;
+		++nb;		
 	    }
-	    
-	    t = index_t(T.flags & ~ushort(CONFLICT_MASK));
-	} 
+	}
+
+	index_t nb2 = 0; // for sanity check, number of vertices on border
+	                 // of conflict zone (should match nb).
+
+	// Traverse the list of edges on the border of the conflict zone
+	// (see previous comment block for explanations). For each edge
+	// on the border of the conflict zone, generate a new triangle.
+	// - Connect it to the triangle on the border of the conflict zone
+	// - Connect it to the previous new triangle
+	// - Special case: in the end, connect the first new triangle with
+	//    the last one.
+
+	// check we are not in the special case with all triangles in conflict
+	if(first_v_on_border != END_OF_LIST) {
+	    VBW::index_t v = first_v_on_border;
+	    VBW::ushort prev_new_t  = VBW::ushort(-1);
+	    VBW::ushort first_new_t = VBW::ushort(-1);
+	    do {
+		++nb2;
+		index_t t = v2t_[v];
+		index_t e = v2e_[v];
+		index_t v1 = triangle_vertex(t, (e+1)%3);
+		index_t v2 = triangle_vertex(t, (e+2)%3);
+		vbw_assert(v1 == v);
+		VBW::ushort new_t = VBW::ushort(new_triangle(lv, v2, v1));
+		set_triangle_adjacent(new_t, 0, t);
+		set_triangle_adjacent(t, e, new_t);
+		if(prev_new_t == VBW::ushort(-1)) {
+		    first_new_t = new_t;
+		} else {
+		    set_triangle_adjacent(prev_new_t, 2, new_t);
+		    set_triangle_adjacent(new_t, 1, prev_new_t);
+		}
+		prev_new_t = new_t;
+		v = v2;
+	    } while (v != first_v_on_border);
+	    set_triangle_adjacent(prev_new_t, 2, first_new_t);
+	    set_triangle_adjacent(first_new_t, 1, prev_new_t);
+	}
+
+	vbw_assert(nb2 == nb);
 	
 	// Recycle triangles in conflict zone
 	set_triangle_flags(conflict_tail, ushort(first_free_));
@@ -28039,9 +28130,10 @@ namespace VBW {
 	return (det > 0.0);
     }
     
-    vec4 ConvexCell::compute_triangle_point(TriangleWithFlags T) const {
+    vec4 ConvexCell::compute_triangle_point(index_t t) const {
 
 	double infinite_len = 16.0;
+	TriangleWithFlags T = get_triangle_and_flags(t); 
 	
 	// Special cases with one of the three vertices at infinity.
 	if(T.i == VERTEX_AT_INFINITY) {
@@ -28051,10 +28143,9 @@ namespace VBW {
 		make_vec3(Pj.x, Pj.y, Pj.z),
 		make_vec3(Pk.x, Pk.y, Pk.z)
 	    ));
-	    index_t t_adj = vv2t(T.k, T.j);
+	    index_t t_adj = t_adj_[t].i; // vv2t(T.k, T.j);
 	    vbw_assert(!triangle_is_infinite(t_adj));
-	    TriangleWithFlags T_adj = t_[t_adj];
-	    vec4 result = compute_triangle_point(T_adj);
+	    vec4 result = compute_triangle_point(t_adj);
 	    result.x += result.w * Njk.x * infinite_len;
 	    result.y += result.w * Njk.y * infinite_len;
 	    result.z += result.w * Njk.z * infinite_len;
@@ -28066,10 +28157,9 @@ namespace VBW {
 		make_vec3(Pk.x, Pk.y, Pk.z),
 		make_vec3(Pi.x, Pi.y, Pi.z)
 	    ));
-	    index_t t_adj = vv2t(T.i, T.k);
+	    index_t t_adj = t_adj_[t].j; // vv2t(T.i, T.k);
 	    vbw_assert(!triangle_is_infinite(t_adj));
-	    TriangleWithFlags T_adj = t_[t_adj];
-	    vec4 result = compute_triangle_point(T_adj);
+	    vec4 result = compute_triangle_point(t_adj);
 	    result.x += result.w * Nki.x * infinite_len;
 	    result.y += result.w * Nki.y * infinite_len;
 	    result.z += result.w * Nki.z * infinite_len;
@@ -28081,10 +28171,9 @@ namespace VBW {
 		make_vec3(Pi.x, Pi.y, Pi.z),
 		make_vec3(Pj.x, Pj.y, Pj.z)
 	    ));
-	    index_t t_adj = vv2t(T.j, T.i);
+	    index_t t_adj = t_adj_[t].k; // vv2t(T.j, T.i);
 	    vbw_assert(!triangle_is_infinite(t_adj));
-	    TriangleWithFlags T_adj = t_[t_adj];
-	    vec4 result = compute_triangle_point(T_adj);
+	    vec4 result = compute_triangle_point(t_adj);
 	    result.x += result.w * Nij.x * infinite_len;
 	    result.y += result.w * Nij.y * infinite_len;
 	    result.z += result.w * Nij.z * infinite_len;
@@ -28157,21 +28246,17 @@ namespace VBW {
     
 
     void ConvexCell::grow_v() {
-	vector<ushort> vv2t_new((max_v_*2)*(max_v_*2));
-	for(index_t j=0; j<max_v_; ++j) {	
-	    for(index_t i=0; i<max_v_; ++i) {
-		vv2t_new[max_v_ * 2 * j + i] = vv2t_[max_v_ * j + i];
-	    }
-	}
-	std::swap(vv2t_, vv2t_new);
 	max_v_ *= 2;
 	plane_eqn_.resize(max_v_);
 	vglobal_.resize(max_v_, global_index_t(-1));
+	v2t_.resize(max_v_, ushort(-1));
+	v2e_.resize(max_v_, uchar(-1));	
     }
 
     void ConvexCell::grow_t() {
 	max_t_ *= 2;
 	t_.resize(max_t_);
+	t_adj_.resize(max_t_);	
 	if(has_tflags_) {
 	    tflags_.resize(max_t_,0);
 	}
@@ -28191,9 +28276,6 @@ namespace VBW {
 	    if(T.k == v) {
 		T.k = VERTEX_AT_INFINITY;
 	    }
-	    set_vv2t(T.i, T.j, t);
-	    set_vv2t(T.j, T.k, t);
-	    set_vv2t(T.k, T.i, t);
 	    t_[t].i = T.i;
 	    t_[t].j = T.j;
 	    t_[t].k = T.k;	    
@@ -28208,19 +28290,12 @@ namespace VBW {
 	}
 
 	triangle_point_.resize(nb_t());
+	v2t_.assign(max_v(),END_OF_LIST);
 	
-	// Yes, need to do that with two
-	// instructions: resize(nb_v(), END_OF_LIST)
-	// does not reset the existing items to
-	// END_OF LIST !! (had a hard time finding
-	// this bug...)
-	v2t_.resize(nb_v());
-	v2t_.assign(nb_v(),END_OF_LIST);
-
         index_t t = first_valid_;
         while(t != END_OF_LIST) { 
 	    TriangleWithFlags T = get_triangle_and_flags(t);
-	    vec4 p = compute_triangle_point(T);
+	    vec4 p = compute_triangle_point(t);
 	    triangle_point_[t] = make_vec3(p.x/p.w, p.y/p.w, p.z/p.w);
 	    v2t_[T.i] = ushort(t);
 	    v2t_[T.j] = ushort(t);
@@ -28402,7 +28477,7 @@ namespace VBW {
         while(t != END_OF_LIST) { 
 	    TriangleWithFlags T = get_triangle_and_flags(t);
 	    if(geometry_dirty_) {
-		vec4 p4 = compute_triangle_point(T);
+		vec4 p4 = compute_triangle_point(t);
 		vec3 p3 = make_vec3(
 		    p4.x/p4.w, p4.y/p4.w, p4.z/p4.w
 		);
@@ -28431,6 +28506,63 @@ namespace VBW {
 	return result;
     }
 
+
+    void ConvexCell::connect_triangles() {
+
+	// create array that maps vertices pairs to triangles.
+	// size of the array is nb_v squared.
+	// If nb_v is small, allocate it on the stack, else
+	// allocate it on the heap (allocating on the stack is
+	// interesting for multithreading).
+	
+	const index_t MAX_NV_ON_STACK = 50;
+	index_t NV = nb_v();
+	ushort* vv2t =
+	    (NV <= MAX_NV_ON_STACK) ? (ushort*)alloca(NV*NV*sizeof(ushort))
+	                            : new ushort[NV*NV]
+			            ;
+
+	#ifdef GEO_DEBUG
+	for(index_t i=0; i<NV*NV; ++i) {
+	    vv2t[i] = END_OF_LIST;
+	}
+	#endif
+	
+	for(
+	    ushort t = first_triangle();
+	    t != END_OF_LIST;
+	    t = next_triangle(t)
+	) {
+	    Triangle T = t_[t];
+	    vbw_assert(T.i < nb_v());
+	    vbw_assert(T.j < nb_v());
+	    vbw_assert(T.k < nb_v());
+	    vv2t[NV*T.j + T.k] = t;
+	    vv2t[NV*T.k + T.i] = t;	    	    	    
+	    vv2t[NV*T.i + T.j] = t;
+	}
+
+	for(
+	    ushort t = first_triangle();
+	    t != END_OF_LIST;
+	    t = next_triangle(t)
+	) {
+	    Triangle T = t_[t];
+	    vbw_assert(vv2t[NV*T.j + T.i] != END_OF_LIST);
+	    vbw_assert(vv2t[NV*T.k + T.j] != END_OF_LIST);
+	    vbw_assert(vv2t[NV*T.i + T.k] != END_OF_LIST);	    	    
+	    t_adj_[t] = make_triangle(
+		vv2t[NV*T.k + T.j],
+		vv2t[NV*T.i + T.k],				
+		vv2t[NV*T.j + T.i]
+	    );
+	}
+
+	if(NV > MAX_NV_ON_STACK) {
+	    delete[] vv2t;
+	}
+    }
+    
     
 
     
@@ -28633,7 +28765,7 @@ namespace GEO {
 	}
 
 	
-        ~PeriodicDelaunay3dThread() {
+        ~PeriodicDelaunay3dThread() override {
             pthread_mutex_destroy(&mutex_);
             pthread_cond_destroy(&cond_);
         }
@@ -28691,7 +28823,7 @@ namespace GEO {
             );
         }
 
-        virtual void run() {
+        void run() override {
 	    has_empty_cells_ = false;
             finished_ = false;
 
@@ -30704,7 +30836,7 @@ namespace GEO {
 	
         Stopwatch* W = nullptr ;
         if(benchmark_mode_) {
-            W = new Stopwatch("SpatialSort");
+            W = new Stopwatch("BRIO");
         }
 	nb_vertices_non_periodic_ = nb_vertices;
 
@@ -30840,9 +30972,9 @@ namespace GEO {
             index_t tot_failed_locate = 0 ;
             for(index_t t=0; t<threads_.size(); ++t) {
                 Logger::out("PDEL") 
-                    << "thread " << t << " : " 
-                    << thread(t)->nb_rollbacks() << " rollbacks  "
-                    << thread(t)->nb_failed_locate() << " failed locate"
+                    << "thread " << std::setw(3) << t << " : " 
+                    << std::setw(3) << thread(t)->nb_rollbacks() << " rollbacks  "
+                    << std::setw(3) << thread(t)->nb_failed_locate() << " restarted locate"
                     << std::endl;
                 tot_rollbacks += thread(t)->nb_rollbacks();
                 tot_failed_locate += thread(t)->nb_failed_locate();
@@ -30850,7 +30982,7 @@ namespace GEO {
             Logger::out("PDEL") << "------------------" << std::endl;
             Logger::out("PDEL") << "total: " 
                                 << tot_rollbacks << " rollbacks  "
-                                << tot_failed_locate << " failed locate"
+                                << tot_failed_locate << " restarted locate"
                                 << std::endl;
         }
 
@@ -31350,6 +31482,7 @@ namespace GEO {
 	        );
 	    }
 	}
+        C.connect_triangles();
     }
 
     

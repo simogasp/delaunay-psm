@@ -250,7 +250,7 @@ namespace GEO {
 #  error "Unsupported compiler"
 #endif
 
-#if defined(__x86_64) || defined(__ppc64__)
+#if defined(__x86_64) || defined(__ppc64__) || defined(__arm64__) || defined(__aarch64__)
 #  define GEO_ARCH_64
 #else
 #  define GEO_ARCH_32
@@ -315,11 +315,23 @@ namespace GEO {
 #endif
 #endif
 
+// For Graphite GOM generator (swig is confused by throw() specifier) 
+#ifdef GOMGEN 
+#define GEO_NOEXCEPT
+#endif
+
 #ifndef GEO_NOEXCEPT
 #define GEO_NOEXCEPT throw()
 #endif
 
 #define FOR(I,UPPERBND) for(index_t I = 0; I<index_t(UPPERBND); ++I)
+
+// Silence warnings for alloca()
+// We use it at different places to allocate objects on the stack
+// (for instance, in multi-precision predicates).
+#ifdef GEO_COMPILER_CLANG
+#pragma GCC diagnostic ignored "-Walloca"
+#endif
 
 #endif
 
@@ -1289,7 +1301,7 @@ namespace GEO {
         );
 
     protected:
-        virtual ~Environment();
+         ~Environment() override;
 
         virtual bool get_local_value(
             const std::string& name, std::string& value
@@ -1328,15 +1340,15 @@ namespace GEO {
     class SystemEnvironment : public Environment {
     protected:
         
-        virtual ~SystemEnvironment();
+        ~SystemEnvironment() override;
 
-        virtual bool set_local_value(
+        bool set_local_value(
             const std::string& name, const std::string& value
-        );
+        ) override;
 
-        virtual bool get_local_value(
+        bool get_local_value(
             const std::string& name, std::string& value
-        ) const;
+        ) const override;
     };
 }
 
@@ -1370,7 +1382,7 @@ namespace GEO {
         }
 
     private:
-        virtual int sync();
+        int sync() override;
 
     private:
         LoggerStream* loggerStream_;
@@ -1382,7 +1394,7 @@ namespace GEO {
     public:
         LoggerStream(Logger* logger);
 
-        virtual ~LoggerStream();
+        ~LoggerStream() override;
 
     protected:
         void notify(const std::string& str);
@@ -1406,7 +1418,7 @@ namespace GEO {
 
         virtual void status(const std::string& str) = 0;
 
-        virtual ~LoggerClient();
+        ~LoggerClient() override;
     };
 
     
@@ -1418,18 +1430,18 @@ namespace GEO {
     public:
         ConsoleLogger();
 
-        void div(const std::string& title);
+        void div(const std::string& title) override;
 
-        void out(const std::string& str);
+        void out(const std::string& str) override;
 
-        void warn(const std::string& str);
+        void warn(const std::string& str) override;
 
-        void err(const std::string& str);
+        void err(const std::string& str) override;
 
-        void status(const std::string& str);
+        void status(const std::string& str) override;
 
     protected:
-        virtual ~ConsoleLogger();
+        ~ConsoleLogger() override;
     };
 
     
@@ -1440,18 +1452,18 @@ namespace GEO {
 
         FileLogger(const std::string& file_name);
 
-        void div(const std::string& title);
+        void div(const std::string& title) override;
 
-        void out(const std::string& str);
+        void out(const std::string& str) override;
 
-        void warn(const std::string& str);
+        void warn(const std::string& str) override;
 
-        void err(const std::string& str);
+        void err(const std::string& str) override;
 
-        void status(const std::string& str);
+        void status(const std::string& str) override;
 
     protected:
-        virtual ~FileLogger();
+        ~FileLogger() override;
 
         void set_file_name(const std::string& file_name);
 
@@ -1514,7 +1526,7 @@ namespace GEO {
     protected:
         Logger();
 
-        virtual ~Logger();
+        ~Logger() override;
 
         
         std::ostream& div_stream(const std::string& title);
@@ -1541,13 +1553,13 @@ namespace GEO {
 
         void notify_status(const std::string& message);
 
-        virtual bool set_local_value(
+        bool set_local_value(
             const std::string& name, const std::string& value
-        );
+        ) override;
 
-        virtual bool get_local_value(
+        bool get_local_value(
             const std::string& name, std::string& value
-        ) const;
+        ) const override;
 
     private:
         static SmartPointer<Logger> instance_;
@@ -2497,7 +2509,7 @@ namespace GEO {
 
     protected:
         
-        virtual ~ProgressClient();
+         ~ProgressClient() override;
     };
 
     
@@ -2506,7 +2518,7 @@ namespace GEO {
     
 
     struct GEOGRAM_API TaskCanceled : std::exception {
-        virtual const char* what() const GEO_NOEXCEPT;
+        const char* what() const GEO_NOEXCEPT override;
     };
 
     
@@ -2631,7 +2643,7 @@ namespace GEO {
 
     protected:
         
-        virtual ~Thread();
+        ~Thread() override;
 
 
     private:
@@ -2691,7 +2703,7 @@ namespace GEO {
         }
 
         
-        virtual ~ThreadManager();
+        ~ThreadManager() override;
     };
 
     
@@ -2699,19 +2711,19 @@ namespace GEO {
 
     class GEOGRAM_API MonoThreadingThreadManager : public ThreadManager {
     public:
-        virtual index_t maximum_concurrent_threads();
+        index_t maximum_concurrent_threads() override;
 
-        virtual void enter_critical_section();
+        void enter_critical_section() override;
 
-        virtual void leave_critical_section();
+        void leave_critical_section() override;
 
     protected:
         
-        virtual ~MonoThreadingThreadManager();
+        ~MonoThreadingThreadManager() override;
 
-        virtual void run_concurrent_threads(
+        void run_concurrent_threads(
             ThreadGroup& threads, index_t max_threads
-        );
+        ) override;
     };
 
     namespace Process {
@@ -2986,7 +2998,7 @@ namespace GEO {
         };
 
     protected:
-        virtual ~Factory() {
+        ~Factory() override {
         }
 
     private:
@@ -4680,6 +4692,10 @@ namespace GEO {
 
 
 
+// Uncomment to get full reporting on predicate statistics
+// (but has a non-negligible impact on performance)
+// #define PCK_STATS
+
 namespace GEO {
 
     namespace PCK {
@@ -5006,7 +5022,7 @@ namespace GEO {
         public:
             ConversionError(const std::string& s, const std::string& type);
 
-            virtual const char* what() const GEO_NOEXCEPT;
+            const char* what() const GEO_NOEXCEPT override;
         };
 
         template <class T>
@@ -5679,6 +5695,7 @@ namespace GEO {
 #ifndef STANDALONE_CONVEX_CELL
 namespace GEO {
     class Mesh;
+    class PeriodicDelaunay3d;
 }
 #endif
 
@@ -5826,6 +5843,14 @@ namespace VBW {
 	ushort i;
 	ushort j;
 	ushort k;
+	ushort operator[](unsigned int index) const {
+	    vbw_assert(index < 3);
+	    return (&i)[index];
+	}
+	ushort& operator[](unsigned int index) {
+	    vbw_assert(index < 3);
+	    return (&i)[index];
+	}
     };
 
     inline Triangle make_triangle(
@@ -5906,473 +5931,489 @@ namespace VBW {
     typedef index_t ConvexCellFlags;
     
     class GEOGRAM_API ConvexCell {
-      public:
+    public:
 
-	ConvexCell(ConvexCellFlags flags = None);
+    ConvexCell(ConvexCellFlags flags = None);
 
 #ifndef STANDALONE_CONVEX_CELL
-	void use_exact_predicates(bool x) {
-	    use_exact_predicates_ = x;
-	}
+    void use_exact_predicates(bool x) {
+	use_exact_predicates_ = x;
+    }
 #endif
 	
-	bool has_vglobal() const {
-	    return has_vglobal_;
-	}
+    bool has_vglobal() const {
+	return has_vglobal_;
+    }
 
-	bool has_tflags() const {
-	    return has_tflags_;
-	}
+    bool has_tflags() const {
+	return has_tflags_;
+    }
 
-	void create_vglobal() {
-	    if(!has_vglobal()) {
-		has_vglobal_ = true;
-		vglobal_.assign(max_v(), global_index_t(-1));
-	    }
+    void create_vglobal() {
+	if(!has_vglobal()) {
+	    has_vglobal_ = true;
+	    vglobal_.assign(max_v(), global_index_t(-1));
 	}
+    }
 	
-	void clear();
+    void clear();
 	
-	void init_with_box(
-	    double xmin, double ymin, double zmin,
-	    double xmax, double ymax, double zmax
-	);
+    void init_with_box(
+	double xmin, double ymin, double zmin,
+	double xmax, double ymax, double zmax
+    );
 
-        void init_with_tet(
-	    vec4 P0, vec4 P1, vec4 P2, vec4 P3
-	);
+    void init_with_tet(
+	vec4 P0, vec4 P1, vec4 P2, vec4 P3
+    );
 
-        void init_with_tet(
-	    vec4 P0, vec4 P1, vec4 P2, vec4 P3,
-	    global_index_t P0_global_index,
-	    global_index_t P1_global_index,
-	    global_index_t P2_global_index,
-	    global_index_t P3_global_index	    
-	);
+    void init_with_tet(
+	vec4 P0, vec4 P1, vec4 P2, vec4 P3,
+	global_index_t P0_global_index,
+	global_index_t P1_global_index,
+	global_index_t P2_global_index,
+	global_index_t P3_global_index	    
+    );
       
-	void save(const std::string& filename, double shrink=0.0) const;
+    void save(const std::string& filename, double shrink=0.0) const;
 
 
-	index_t save(
-	    std::ostream& out, global_index_t v_offset=1, double shrink=0.0,
-	    bool borders_only=false
-	) const;
+    index_t save(
+	std::ostream& out, global_index_t v_offset=1, double shrink=0.0,
+	bool borders_only=false
+    ) const;
 
 #if !defined(STANDALONE_CONVEX_CELL) && !defined(GEOGRAM_PSM)
-        void append_to_mesh(
-	    GEO::Mesh* mesh,
-	    double shrink=0.0, bool borders_only=false,
-	    GEO::Attribute<GEO::index_t>* facet_attr=nullptr
-	) const;
+    void append_to_mesh(
+	GEO::Mesh* mesh,
+	double shrink=0.0, bool borders_only=false,
+	GEO::Attribute<GEO::index_t>* facet_attr=nullptr
+    ) const;
 
 #endif      
 
-        void for_each_Voronoi_vertex(
-	    index_t v,
-	    std::function<void(index_t)> vertex
-        );
+    void for_each_Voronoi_vertex(
+	index_t v,
+	std::function<void(index_t)> vertex
+    );
       
-	void clip_by_plane(vec4 P);
+    void clip_by_plane(vec4 P);
 
-	void clip_by_plane(vec4 P, global_index_t j);
+    void clip_by_plane(vec4 P, global_index_t j);
 
 
-        void clip_by_plane(
-	    vec4 P, global_index_t P_global_index,
-	    std::function<bool(ushort,ushort)> triangle_conflict_predicate
-	);
+    void clip_by_plane(
+	vec4 P, global_index_t P_global_index,
+	std::function<bool(ushort,ushort)> triangle_conflict_predicate
+    );
       
-        void clip_by_plane_fast(vec4 P);
+    void clip_by_plane_fast(vec4 P);
 
-        void clip_by_plane_fast(vec4 P, global_index_t j);      
+    void clip_by_plane_fast(vec4 P, global_index_t j);      
       
-	index_t nb_t() const {
-	    return nb_t_;
-	}
+    index_t nb_t() const {
+	return nb_t_;
+    }
 
-	index_t nb_v() const {
-	    return nb_v_;
-	}
+    index_t nb_v() const {
+	return nb_v_;
+    }
 
-	index_t create_vertex(vec4 P) {
-	    if(nb_v_ == max_v_) {
-		grow_v();
-	    }
-	    plane_eqn_[nb_v_] = P;
-	    index_t result = nb_v_;
-	    ++nb_v_;
-	    return result;
+    index_t create_vertex(vec4 P) {
+	if(nb_v_ == max_v_) {
+	    grow_v();
 	}
+	plane_eqn_[nb_v_] = P;
+	index_t result = nb_v_;
+	++nb_v_;
+	return result;
+    }
 
-	index_t create_vertex(vec4 P, global_index_t v) {
-	    index_t result = create_vertex(P);
-	    vglobal_[nb_v()-1] = v;
-	    return result;
-	}
+    index_t create_vertex(vec4 P, global_index_t v) {
+	index_t result = create_vertex(P);
+	vglobal_[nb_v()-1] = v;
+	return result;
+    }
 	
-	index_t create_triangle(index_t i, index_t j, index_t k) {
-	    vbw_assert(i < nb_v());
-	    vbw_assert(j < nb_v());
-	    vbw_assert(k < nb_v());
-	    return new_triangle(i,j,k);
+    index_t create_triangle(index_t i, index_t j, index_t k) {
+	vbw_assert(i < nb_v());
+	vbw_assert(j < nb_v());
+	vbw_assert(k < nb_v());
+	return new_triangle(i,j,k);
+    }
+
+    void kill_vertex(index_t v);
+
+    bool vertex_is_contributing(index_t v) const {
+	if(!geometry_dirty_) {
+	    return v2t_[v] != END_OF_LIST;
 	}
-
-	void kill_vertex(index_t v);
-
-	bool vertex_is_contributing(index_t v) const {
-	    if(!geometry_dirty_) {
-		return v2t_[v] != END_OF_LIST;
+	index_t t = first_valid_;
+	while(t != END_OF_LIST) { 
+	    TriangleWithFlags T = get_triangle_and_flags(t);
+	    if(T.i == v || T.j == v || T.k == v) {
+		return true;
 	    }
-	    index_t t = first_valid_;
-	    while(t != END_OF_LIST) { 
-		TriangleWithFlags T = get_triangle_and_flags(t);
-		if(T.i == v || T.j == v || T.k == v) {
-		    return true;
-		}
-		t = index_t(T.flags);
-	    }
-	    return false;
+	    t = index_t(T.flags);
 	}
+	return false;
+    }
 
-	void compute_geometry();
-
-	double facet_area(index_t v) const;
-
-	double volume() const;
-
-	vec3 barycenter() const;
-
-        void compute_mg(double& m, vec3& mg) const ;
-
-      
-	double squared_radius(vec3 center) const;
-
-	double squared_inner_radius(vec3 center) const;
-
+    index_t vertex_triangle(index_t v) const {
+	geo_assert(!geometry_dirty_);	    
+	return v2t_[v];
+    }
 	
-	bool empty() const {
-	    return first_valid_ == END_OF_LIST;
-	}
+    void compute_geometry();
 
-	global_index_t v_global_index(index_t lv) const {
-	    vbw_assert(has_vglobal_);
-	    vbw_assert(lv < nb_v());
-	    return vglobal_[lv];
-	}
+    double facet_area(index_t v) const;
 
-	void set_v_global_index(index_t lv, global_index_t v) {
-	    vbw_assert(has_vglobal_);
-	    vbw_assert(lv < nb_v());
-	    vglobal_[lv] = v;
-	}
-	
-	bool has_v_global_index(global_index_t v) const;
+    double volume() const;
 
-	ushort first_triangle() const {
-	    return ushort(first_valid_);
-	}
+    vec3 barycenter() const;
 
-	ushort next_triangle(ushort t) const {
-	    return get_triangle_flags(t);
-	}
-
-	vec3 triangle_point(ushort t) const {
-	    if(geometry_dirty_) {
-		TriangleWithFlags T = get_triangle_and_flags(t);
-		vec4 result = compute_triangle_point(T);
-		vbw_assert(result.w != 0.0);
-		return make_vec3(
-		    result.x/result.w, result.y/result.w, result.z/result.w
-		);
-	    }
-	    return triangle_point_[t];
-	}
-
-	global_index_t triangle_v_global_index(ushort t, index_t llv) const {
-	    Triangle T = get_triangle(t);
-	    ushort lv = ushort((llv==0)*T.i + (llv==1)*T.j + (llv==2)*T.k);
-	    return v_global_index(lv);
-	}
-
-	index_t triangle_v_local_index(ushort t, index_t llv) const {
-	    Triangle T = get_triangle(t);
-	    return index_t((llv==0)*T.i + (llv==1)*T.j + (llv==2)*T.k);
-	}
-
-	bool triangle_is_user_marked(ushort t) {
-	    vbw_assert(has_tflags_);
-	    vbw_assert(t < max_t_);
-	    return (tflags_[t] != 0);
-	}
-
-	void triangle_user_mark(ushort t) {
-	    vbw_assert(has_tflags_);
-	    vbw_assert(t < max_t_);
-	    tflags_[t] = 1;
-	}
-
-	void triangle_user_unmark(ushort t) {
-	    vbw_assert(has_tflags_);
-	    vbw_assert(t < max_t_);
-	    tflags_[t] = 0;
-	}
-
-	bool cell_has_conflict(const vec4& P) {
-	    for(
-		ushort t = first_triangle();
-		t!=END_OF_LIST; t=next_triangle(t)
-	    ) {
-		TriangleWithFlags T = get_triangle_and_flags(t);
-		if(triangle_is_in_conflict(T,P)) {
-		    return true;
-		}
-	    }
-	    return false;
-	}
-
-	bool cell_is_totally_in_conflict(const vec4& P) {
-	    for(
-		ushort t = first_triangle();
-		t!=END_OF_LIST; t=next_triangle(t)
-	    ) {
-		TriangleWithFlags T = get_triangle_and_flags(t);
-		if(!triangle_is_in_conflict(T,P)) {
-		    return false;
-		}
-	    }
-	    return true;
-	}
-	
-	 index_t triangle_adjacent(index_t t, index_t le) const {
-	     vbw_assert(t < max_t());
-	     vbw_assert(le < 3);
-	     Triangle T = get_triangle(t);
-	     index_t v1 =
-		 index_t((le == 0)*T.j + (le == 1)*T.k + (le == 2)*T.i);
-	     index_t v2 =
-		 index_t((le == 0)*T.k + (le == 1)*T.i + (le == 2)*T.j);
-	     vbw_assert(vv2t(v1,v2) == t);
-	     vbw_assert(vv2t(v2,v1) != END_OF_LIST);
-	     return vv2t(v2,v1);
-	 }
-
-         index_t triangle_vertex(index_t t, index_t lv) const {
-	     vbw_assert(t < max_t());
-	     vbw_assert(lv < 3);
-	     Triangle T = get_triangle(t);
-	     return index_t((lv==0)*T.i+(lv==1)*T.j+(lv==2)*T.k);
-	 }
+    void compute_mg(double& m, vec3& mg) const ;
 
       
-	index_t triangle_find_vertex(index_t t, index_t v) const {
-	    vbw_assert(t < max_t());
-	    Triangle T = get_triangle(t);
-	    index_t result = index_t((T.j == v) + 2*(T.k == v));
-	    return result;
-	}
+    double squared_radius(vec3 center) const;
 
-	bool triangle_is_infinite(index_t t) const {
-	    vbw_assert(t < max_t());
-	    Triangle T = get_triangle(t);
-	    return (
-		T.i == VERTEX_AT_INFINITY ||
-		T.j == VERTEX_AT_INFINITY ||
-		T.k == VERTEX_AT_INFINITY
-	    );
-	}
+    double squared_inner_radius(vec3 center) const;
+
 	
-        vec4 vertex_plane(index_t v) const {
-	    vbw_assert(v < max_v());
-	    return plane_eqn_[v];
-	}
+    bool empty() const {
+	return first_valid_ == END_OF_LIST;
+    }
 
-	vec3 vertex_plane_normal(index_t v) const {
-	    vbw_assert(v != VERTEX_AT_INFINITY);
-	    vbw_assert(v < max_v());
+    global_index_t v_global_index(index_t lv) const {
+	vbw_assert(has_vglobal_);
+	vbw_assert(lv < nb_v());
+	return vglobal_[lv];
+    }
+
+    void set_v_global_index(index_t lv, global_index_t v) {
+	vbw_assert(has_vglobal_);
+	vbw_assert(lv < nb_v());
+	vglobal_[lv] = v;
+    }
+	
+    bool has_v_global_index(global_index_t v) const;
+
+    ushort first_triangle() const {
+	return ushort(first_valid_);
+    }
+
+    ushort next_triangle(ushort t) const {
+	return get_triangle_flags(t);
+    }
+
+    vec3 triangle_point(ushort t) const {
+	if(geometry_dirty_) {
+	    vec4 result = compute_triangle_point(t);
+	    vbw_assert(result.w != 0.0);
 	    return make_vec3(
-		plane_eqn_[v].x,
-		plane_eqn_[v].y,
-		plane_eqn_[v].z
+		result.x/result.w, result.y/result.w, result.z/result.w
 	    );
 	}
-	
-	bool triangle_is_marked_as_conflict(index_t t) const {
-	    vbw_assert(t < max_t());
-	    return (get_triangle_flags(t) & ushort(CONFLICT_MASK)) != 0;
-	}
-       
-        bool triangle_is_in_conflict(
-	    TriangleWithFlags T, const vec4& eqn
-	) const;
+	return triangle_point_[t];
+    }
 
-	index_t new_triangle(index_t i, index_t j, index_t k) {
-	    index_t result = first_free_;
-	    if(result == END_OF_LIST) {
-		result = nb_t_;
-		++nb_t_;
-		if(nb_t_ > max_t()) {
-		    grow_t();
-		}
-	    } else {
-		first_free_ = index_t(
-		    get_triangle_flags(first_free_) & ~ushort(CONFLICT_MASK)
-		);
-	    }
-	    vbw_assert(result < max_t());
-	    t_[result] = make_triangle_with_flags(
-		ushort(i), ushort(j), ushort(k), ushort(first_valid_)
-	    );
-	    set_vv2t(i, j, result);
-	    set_vv2t(j, k, result);
-	    set_vv2t(k, i, result);	    
-	    first_valid_ = result;
-	    if(has_tflags_) {
-		tflags_[result] = 0;
-	    }
-	    return result;
-	}
-	
-	index_t new_triangle(
-	    index_t i, index_t j, index_t k,
-	    index_t adj0, index_t adj1, index_t adj2
+    global_index_t triangle_v_global_index(ushort t, index_t llv) const {
+	Triangle T = get_triangle(t);
+	ushort lv = ushort((llv==0)*T.i + (llv==1)*T.j + (llv==2)*T.k);
+	return v_global_index(lv);
+    }
+
+    index_t triangle_v_local_index(ushort t, index_t llv) const {
+	Triangle T = get_triangle(t);
+	return index_t((llv==0)*T.i + (llv==1)*T.j + (llv==2)*T.k);
+    }
+
+    bool triangle_is_user_marked(ushort t) {
+	vbw_assert(has_tflags_);
+	vbw_assert(t < max_t_);
+	return (tflags_[t] != 0);
+    }
+
+    void triangle_user_mark(ushort t) {
+	vbw_assert(has_tflags_);
+	vbw_assert(t < max_t_);
+	tflags_[t] = 1;
+    }
+
+    void triangle_user_unmark(ushort t) {
+	vbw_assert(has_tflags_);
+	vbw_assert(t < max_t_);
+	tflags_[t] = 0;
+    }
+
+    bool cell_has_conflict(const vec4& P) {
+	for(
+	    ushort t = first_triangle();
+	    t!=END_OF_LIST; t=next_triangle(t)
 	) {
-	    // Silence warnings
-	    (void)(adj0);
-	    (void)(adj1);
-	    (void)(adj2);	    
-	    return new_triangle(i, j, k);
+	    TriangleWithFlags T = get_triangle_and_flags(t);
+	    if(triangle_is_in_conflict(T,P)) {
+		return true;
+	    }
 	}
+	return false;
+    }
 
-	vec4 compute_triangle_point(TriangleWithFlags T) const;
-
-	Triangle get_triangle(index_t t) const {
-	    vbw_assert(t < max_t());
-	    return t_[t];
+    bool cell_is_totally_in_conflict(const vec4& P) {
+	for(
+	    ushort t = first_triangle();
+	    t!=END_OF_LIST; t=next_triangle(t)
+	) {
+	    TriangleWithFlags T = get_triangle_and_flags(t);
+	    if(!triangle_is_in_conflict(T,P)) {
+		return false;
+	    }
 	}
-	
-	ushort get_triangle_flags(index_t t) const {
-	    vbw_assert(t < max_t());
-	    return t_[t].flags;
-	}
-
-	void set_triangle_flags(index_t t, ushort flags) {
-	    vbw_assert(t < max_t());
-	    t_[t].flags = flags;
-	}
-
-	TriangleWithFlags get_triangle_and_flags(index_t t) const {
-	    vbw_assert(t < max_t());
-	    return t_[t];
-	}
-	
-	index_t vv2t(index_t v1, index_t v2) const {
-	    vbw_assert(v1 < max_v());
-	    vbw_assert(v2 < max_v());
-	    return index_t(vv2t_[max_v_*v1 + v2]);
-	}
-
-	void set_vv2t(index_t v1, index_t v2, index_t t) {
-	    vbw_assert(v1 < max_v());
-	    vbw_assert(v2 < max_v());
-	    vv2t_[max_v_*v1+v2] = ushort(t);
-	}
-
-	index_t max_t() const {
-	    return max_t_;
-	}
-
-	index_t max_v() const {
-	    return max_v_;
-	}
-
-	void grow_t();
-
-	void grow_v();
-
-
-        void swap(ConvexCell& other) {
-	    std::swap(max_t_,other.max_t_);
-	    std::swap(max_v_,other.max_v_);
-	    std::swap(t_,other.t_);
-	    std::swap(vv2t_,other.vv2t_);
-	    std::swap(plane_eqn_,other.plane_eqn_);
-	    std::swap(nb_t_,other.nb_t_);
-	    std::swap(nb_v_,other.nb_v_);
-	    std::swap(first_free_,other.first_free_);
-	    std::swap(first_valid_,other.first_valid_);
-	    std::swap(geometry_dirty_,other.geometry_dirty_);
-	    std::swap(triangle_point_,other.triangle_point_);
-	    std::swap(v2t_,other.v2t_);
-	    std::swap(vglobal_,other.vglobal_);
-	    std::swap(has_vglobal_,other.has_vglobal_);
-	    std::swap(tflags_,other.tflags_);
-	    std::swap(has_tflags_,other.has_tflags_);
-#ifndef STANDALONE_CONVEX_CELL	
-	    std::swap(use_exact_predicates_,other.use_exact_predicates_);
-#endif	
-        }
-
-        vec3& stored_triangle_point(ushort t) {
-	    return triangle_point_[t];	    
-        }
+	return true;
+    }
       
-      protected:
+    index_t triangle_adjacent(index_t t, index_t le) const {
+	vbw_assert(t < max_t());
+	vbw_assert(le < 3);
+	return t_adj_[t][le]; // HERE
+    }
 
-        void triangulate_conflict_zone(
-	   index_t lv, index_t conflict_head, index_t conflict_tail
+
+    void set_triangle_adjacent(index_t t1, index_t le, index_t t2) {
+	vbw_assert(t1 < max_t());
+	vbw_assert(le < 3);
+	vbw_assert(t2 < max_t());
+	t_adj_[t1][le] = VBW::ushort(t2);
+    }
+      
+      
+      
+    index_t triangle_vertex(index_t t, index_t lv) const {
+	vbw_assert(t < max_t());
+	vbw_assert(lv < 3);
+	return t_[t][lv];
+    }
+      
+      
+    index_t triangle_find_vertex(index_t t, index_t v) const {
+	vbw_assert(t < max_t());
+	Triangle T = get_triangle(t);
+	index_t result = index_t((T.j == v) + 2*(T.k == v));
+	vbw_assert(triangle_vertex(t,result) == v);
+	return result;
+    }
+
+    index_t triangle_find_adjacent(index_t t1, index_t t2) const {
+	vbw_assert(t1 < max_t());
+	vbw_assert(t2 < max_t());	    
+	Triangle T = t_adj_[t1];
+	index_t result = index_t((T.j == t2) + 2*(T.k == t2));
+	vbw_assert(triangle_adjacent(t1,result) == t2);	    
+	return result;
+    }
+      
+    bool triangle_is_infinite(index_t t) const {
+	vbw_assert(t < max_t());
+	Triangle T = get_triangle(t);
+	return (
+	    T.i == VERTEX_AT_INFINITY ||
+	    T.j == VERTEX_AT_INFINITY ||
+	    T.k == VERTEX_AT_INFINITY
 	);
-      
-        void set_vertex_plane(index_t v, vec4 P) {
-	    vbw_assert(v < max_v());
-	    plane_eqn_[v] = P;
-	    geometry_dirty_ = true;
+    }
+	
+    vec4 vertex_plane(index_t v) const {
+	vbw_assert(v < max_v());
+	return plane_eqn_[v];
+    }
+
+    vec3 vertex_plane_normal(index_t v) const {
+	vbw_assert(v != VERTEX_AT_INFINITY);
+	vbw_assert(v < max_v());
+	return make_vec3(
+	    plane_eqn_[v].x,
+	    plane_eqn_[v].y,
+	    plane_eqn_[v].z
+	);
+    }
+	
+    bool triangle_is_marked_as_conflict(index_t t) const {
+	vbw_assert(t < max_t());
+	return (get_triangle_flags(t) & ushort(CONFLICT_MASK)) != 0;
+    }
+       
+    bool triangle_is_in_conflict(
+	TriangleWithFlags T, const vec4& eqn
+    ) const;
+
+    index_t new_triangle(index_t i, index_t j, index_t k) {
+	index_t result = first_free_;
+	if(result == END_OF_LIST) {
+	    result = nb_t_;
+	    ++nb_t_;
+	    if(nb_t_ > max_t()) {
+		grow_t();
+	    }
+	} else {
+	    first_free_ = index_t(
+		get_triangle_flags(first_free_) & ~ushort(CONFLICT_MASK)
+	    );
 	}
+	vbw_assert(result < max_t());
+	t_[result] = make_triangle_with_flags(
+	    ushort(i), ushort(j), ushort(k), ushort(first_valid_)
+	);
+	first_valid_ = result;
+	if(has_tflags_) {
+	    tflags_[result] = 0;
+	}
+	return result;
+    }
+	
+    index_t new_triangle(
+	index_t i, index_t j, index_t k,
+	index_t adj0, index_t adj1, index_t adj2
+    ) {
+	index_t result = new_triangle(i, j, k);
+	t_adj_[result] = make_triangle(
+	    ushort(adj0), ushort(adj1), ushort(adj2)
+	);
+	return result;
+    }
+
+    vec4 compute_triangle_point(index_t t) const;
+
+    Triangle get_triangle(index_t t) const {
+	vbw_assert(t < max_t());
+	return t_[t];
+    }
+	
+    ushort get_triangle_flags(index_t t) const {
+	vbw_assert(t < max_t());
+	return t_[t].flags;
+    }
+
+    void set_triangle_flags(index_t t, ushort flags) {
+	vbw_assert(t < max_t());
+	t_[t].flags = flags;
+    }
+
+    TriangleWithFlags get_triangle_and_flags(index_t t) const {
+	vbw_assert(t < max_t());
+	return t_[t];
+    }
+
+    bool triangle_is_marked_as_conflict(index_t t) {
+	vbw_assert(t < max_t());
+	ushort flg = get_triangle_flags(t);
+	return ((flg & ushort(CONFLICT_MASK)) != 0);
+    }
+      
+    index_t max_t() const {
+	return max_t_;
+    }
+
+    index_t max_v() const {
+	return max_v_;
+    }
+
+    void grow_t();
+
+    void grow_v();
+
+
+    void swap(ConvexCell& other) {
+	std::swap(max_t_,other.max_t_);
+	std::swap(max_v_,other.max_v_);
+	std::swap(t_,other.t_);
+	std::swap(t_adj_,other.t_adj_);
+	std::swap(plane_eqn_,other.plane_eqn_);
+	std::swap(nb_t_,other.nb_t_);
+	std::swap(nb_v_,other.nb_v_);
+	std::swap(first_free_,other.first_free_);
+	std::swap(first_valid_,other.first_valid_);
+	std::swap(geometry_dirty_,other.geometry_dirty_);
+	std::swap(triangle_point_,other.triangle_point_);
+	std::swap(v2t_,other.v2t_);
+	std::swap(v2e_,other.v2e_);	    
+	std::swap(vglobal_,other.vglobal_);
+	std::swap(has_vglobal_,other.has_vglobal_);
+	std::swap(tflags_,other.tflags_);
+	std::swap(has_tflags_,other.has_tflags_);
+#ifndef STANDALONE_CONVEX_CELL	
+	std::swap(use_exact_predicates_,other.use_exact_predicates_);
+#endif	
+    }
+
+    vec3& stored_triangle_point(ushort t) {
+	return triangle_point_[t];	    
+    }
+
+    protected:
+
+    void connect_triangles();
+    
+
+    void triangulate_conflict_zone(
+	index_t lv, index_t conflict_head, index_t conflict_tail
+    );
+      
+    void set_vertex_plane(index_t v, vec4 P) {
+	vbw_assert(v < max_v());
+	plane_eqn_[v] = P;
+	geometry_dirty_ = true;
+    }
 
       
-      private:
+    private:
 
+    
+    index_t max_t_;
+
+    
+    index_t max_v_;
+
+    
+    vector<TriangleWithFlags> t_;
+
+    
+    vector<Triangle> t_adj_;
+      
+    vector<vec4> plane_eqn_;
+
+    
+    index_t nb_t_;
+
+    	
+    index_t nb_v_;
+
+    
+    index_t first_free_;
+
+    
+    index_t first_valid_;
+
+    bool geometry_dirty_;
+
+    vector<vec3> triangle_point_;
+
+    vector<ushort> v2t_;
+
+    vector<uchar> v2e_;
+      
+    vector<global_index_t> vglobal_;
 	
-	index_t max_t_;
+    bool has_vglobal_;
 
+    vector<uchar> tflags_;
 	
-	index_t max_v_;
-
-	
-	vector<TriangleWithFlags> t_;
-
-	vector<ushort> vv2t_;
-
-	vector<vec4> plane_eqn_;
-
-	
-	index_t nb_t_;
-
-		
-	index_t nb_v_;
-
-	
-	index_t first_free_;
-
-	
-	index_t first_valid_;
-
-	bool geometry_dirty_;
-
-	vector<vec3> triangle_point_;
-
-	vector<ushort> v2t_;
-
-	vector<global_index_t> vglobal_;
-	
-	bool has_vglobal_;
-
-	vector<uchar> tflags_;
-	
-	bool has_tflags_;
+    bool has_tflags_;
 
 #ifndef STANDALONE_CONVEX_CELL	
-	bool use_exact_predicates_;
+    bool use_exact_predicates_;
 #endif
+
+    friend class GEO::PeriodicDelaunay3d;
     };
 }
 
@@ -6405,7 +6446,7 @@ namespace GEO {
                 const char* expected
             );
 
-            virtual const char* what() const GEO_NOEXCEPT;
+            const char* what() const GEO_NOEXCEPT override;
         };
 
 
@@ -6415,9 +6456,9 @@ namespace GEO {
 
             InvalidInput(const InvalidInput& rhs);
 
-            virtual ~InvalidInput() GEO_NOEXCEPT;
+            ~InvalidInput() GEO_NOEXCEPT override;
             
-            virtual const char* what() const GEO_NOEXCEPT;
+            const char* what() const GEO_NOEXCEPT override;
 
             int error_code;
 
@@ -6630,7 +6671,7 @@ namespace GEO {
     protected:
         Delaunay(coord_index_t dimension);
 
-        virtual ~Delaunay();
+        ~Delaunay() override;
 
         virtual void get_neighbors_internal(
             index_t v, vector<index_t>& neighbors
@@ -6728,13 +6769,21 @@ namespace GEO {
     public:
         Delaunay2d(coord_index_t dimension = 2);
 
-        virtual void set_vertices(
+        void set_vertices(
             index_t nb_vertices, const double* vertices
-        );
+        ) override;
 
-        virtual index_t nearest_vertex(const double* p) const;
+        index_t nearest_vertex(const double* p) const override;
+
+	bool has_empty_cells() const {
+	    return has_empty_cells_;
+	}
 
 
+	void abort_if_empty_cell(bool x) {
+	    abort_if_empty_cell_ = x;
+	}
+	
     protected:
 
         static const index_t NO_TRIANGLE = index_t(-1);
@@ -7067,7 +7116,7 @@ namespace GEO {
             return result; 
         }
 
-        virtual ~Delaunay2d();
+        ~Delaunay2d() override;
 
         void show_triangle(index_t t) const;
 
@@ -7100,6 +7149,10 @@ namespace GEO {
 	 static char triangle_edge_vertex_[3][2];
 
 	 std::stack<index_t> S_;
+
+	 bool has_empty_cells_;
+
+	 bool abort_if_empty_cell_;
     };
 
     
@@ -7109,7 +7162,7 @@ namespace GEO {
         RegularWeightedDelaunay2d(coord_index_t dimension = 3);
 
     protected:
-        virtual ~RegularWeightedDelaunay2d();
+        ~RegularWeightedDelaunay2d() override;
     };
 }
 
@@ -7254,9 +7307,9 @@ namespace GEO {
 	
         PeriodicDelaunay3d(bool periodic, double period=1.0);
 
-        virtual void set_vertices(
+        void set_vertices(
             index_t nb_vertices, const double* vertices
-        );
+        ) override;
 
 	void set_weights(const double* weights);
 
@@ -7287,9 +7340,9 @@ namespace GEO {
 	    return periodic_ ? weights_[periodic_vertex_real(v)] : weights_[v] ;
 	}
 
-        virtual index_t nearest_vertex(const double* p) const;
+        index_t nearest_vertex(const double* p) const override;
 
-        virtual void set_BRIO_levels(const vector<index_t>& levels);
+        void set_BRIO_levels(const vector<index_t>& levels) override;
 
 	void get_incident_tets(index_t v, IncidentTetrahedra& W) const;
 
@@ -7328,9 +7381,9 @@ namespace GEO {
 	 
 	index_t compress(bool shrink=true);
 	
-	virtual void update_v_to_cell();
+	void update_v_to_cell() override;
 
-	virtual void update_cicl();
+	void update_cicl() override;
 
 	void handle_periodic_boundaries();
 
@@ -7480,7 +7533,7 @@ namespace GEO {
     protected:
         NearestNeighborSearch(coord_index_t dimension);
 
-        virtual ~NearestNeighborSearch();
+        ~NearestNeighborSearch() override;
 
     protected:
         coord_index_t dimension_;
@@ -7517,40 +7570,40 @@ namespace GEO {
 	KdTree(coord_index_t dim);
 
 	
-        virtual void set_points(index_t nb_points, const double* points);
+        void set_points(index_t nb_points, const double* points) override;
 
 		
-        virtual bool stride_supported() const;
+        bool stride_supported() const override;
 
 	
-        virtual void set_points(
+        void set_points(
             index_t nb_points, const double* points, index_t stride
-        );
+        ) override;
 
 	
-        virtual void get_nearest_neighbors(
+        void get_nearest_neighbors(
             index_t nb_neighbors,
             const double* query_point,
             index_t* neighbors,
             double* neighbors_sq_dist
-        ) const;
+        ) const override;
 
 	
-        virtual void get_nearest_neighbors(
+        void get_nearest_neighbors(
             index_t nb_neighbors,
             const double* query_point,
             index_t* neighbors,
             double* neighbors_sq_dist,
 	    KeepInitialValues
-        ) const;
+        ) const override;
 
 		
-        virtual void get_nearest_neighbors(
+        void get_nearest_neighbors(
             index_t nb_neighbors,
             index_t query_point,
             index_t* neighbors,
             double* neighbors_sq_dist
-        ) const;
+        ) const override;
 	
 	
 	
@@ -7701,7 +7754,7 @@ namespace GEO {
 	    return maxval - minval;
 	}
 
-	virtual ~KdTree();
+	~KdTree() override;
 
       protected:
         vector<index_t> point_index_;
@@ -7717,7 +7770,7 @@ namespace GEO {
         BalancedKdTree(coord_index_t dim);
 
     protected:
-        virtual ~BalancedKdTree();
+        ~BalancedKdTree() override;
 
         static index_t max_node_index(
             index_t node_id, index_t b, index_t e
@@ -7750,16 +7803,16 @@ namespace GEO {
         );
 
 	
-	virtual index_t build_tree();
+	index_t build_tree() override;
 
 	
-	virtual void get_node(
+	void get_node(
 	    index_t n, index_t b, index_t e,
 	    index_t& left_child, index_t& right_child,
 	    coord_index_t&  splitting_coord,
 	    index_t& m,
 	    double& splitting_val
-	) const;
+	) const override;
 	
     protected:
 	
@@ -7778,16 +7831,16 @@ namespace GEO {
 
     protected:	
 	
-	virtual index_t build_tree();
+	index_t build_tree() override;
 
 	
-	virtual void get_node(
+	void get_node(
 	    index_t n, index_t b, index_t e,
 	    index_t& left_child, index_t& right_child,
 	    coord_index_t&  splitting_coord,
 	    index_t& m,
 	    double& splitting_val
-	) const;
+	) const override;
 
         virtual index_t create_kd_tree_recursive(
 	    index_t b, index_t e,
