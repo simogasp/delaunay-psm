@@ -1,9 +1,19 @@
+# /!\ Please use the official repository that is now available on github
+
+https://github.com/BrunoLevy/geogram.psm.Delaunay
+
+This version is not maintained anymore and should serve just as an archive of previous versions.
+
+
+
+----
+
 Delaunay-psm
 ----------------
 
 This is a mirror of the delaunay-psm (Pluggable Software Module) from the Geogram library for the delaunay triangulation.
 
-The full library is hosted at [here](http://alice.loria.fr/index.php/software/4-library/75-geogram.html) and the sources for both the library and the PSM version are hosted [here](https://gforge.inria.fr/frs/?group_id=5833).
+The full library was hosted at [here](http://alice.loria.fr/index.php/software/4-library/75-geogram.html) and the sources for both the library and the PSM version are hosted [here](https://gforge.inria.fr/frs/?group_id=5833).
 
 This repository just allows to build and link the library using cmake. No other changes are made beside the building system.
 
